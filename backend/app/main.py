@@ -1,0 +1,247 @@
+"""
+FastAPI main application entry point.
+Provides REST API endpoints and WebSocket for AutoShorts orchestration.
+"""
+import logging
+from contextlib import asynccontextmanager
+from typing import Dict, List
+from pathlib import Path
+
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import orjson
+
+from app.config import settings, get_settings
+from app.schemas.run_spec import RunSpec, RunStatus
+from app.orchestrator.fsm import FSM, RunState
+from app.utils.logger import setup_logger
+
+# Setup logging
+setup_logger()
+logger = logging.getLogger(__name__)
+
+# In-memory run tracking (production: use Redis/DB)
+runs: Dict[str, dict] = {}
+websocket_clients: Dict[str, List[WebSocket]] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events."""
+    logger.info("Starting AutoShorts Backend...")
+    logger.info(f"Environment: {settings.ENV}")
+    logger.info(f"Image Provider: {settings.IMAGE_PROVIDER}")
+    logger.info(f"TTS Provider: {settings.TTS_PROVIDER}")
+    logger.info(f"Music Provider: {settings.MUSIC_PROVIDER}")
+
+    # Ensure data directories exist
+    Path("app/data/uploads").mkdir(parents=True, exist_ok=True)
+    Path("app/data/outputs").mkdir(parents=True, exist_ok=True)
+    Path("app/data/samples").mkdir(parents=True, exist_ok=True)
+
+    yield
+
+    logger.info("Shutting down AutoShorts Backend...")
+
+
+app = FastAPI(
+    title="AutoShorts API",
+    description="스토리텔링형 숏츠 자동 제작 시스템",
+    version="0.1.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_ORIGIN, "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+async def root():
+    """Health check endpoint."""
+    return {
+        "service": "AutoShorts API",
+        "version": "0.1.0",
+        "status": "running",
+        "environment": settings.ENV
+    }
+
+
+@app.post("/api/runs", response_model=RunStatus)
+async def create_run(spec: RunSpec):
+    """
+    Create a new shorts generation run.
+    Initializes FSM and kicks off Celery orchestration.
+    """
+    from app.celery_app import celery
+    from app.tasks.plan import plan_task
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
+
+    # Initialize FSM
+    fsm = FSM(run_id)
+
+    # Store run metadata
+    runs[run_id] = {
+        "run_id": run_id,
+        "spec": spec.model_dump(),
+        "state": fsm.current_state.value,
+        "progress": 0.0,
+        "artifacts": {},
+        "logs": [],
+        "created_at": None,  # Add timestamp in production
+    }
+
+    # Transition to PLOT_PLANNING and start async task
+    if fsm.transition_to(RunState.PLOT_PLANNING):
+        runs[run_id]["state"] = fsm.current_state.value
+
+        # Kick off planning task asynchronously
+        plan_task.apply_async(args=[run_id, spec.model_dump()])
+
+        await broadcast_to_websockets(run_id, {
+            "type": "state_change",
+            "state": fsm.current_state.value,
+            "message": "Run created, starting plot planning..."
+        })
+
+    return RunStatus(
+        run_id=run_id,
+        state=fsm.current_state.value,
+        progress=0.0,
+        artifacts=runs[run_id]["artifacts"],
+        logs=runs[run_id]["logs"]
+    )
+
+
+@app.get("/api/runs/{run_id}", response_model=RunStatus)
+async def get_run(run_id: str):
+    """Get run status and artifacts."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run_data = runs[run_id]
+    return RunStatus(
+        run_id=run_id,
+        state=run_data["state"],
+        progress=run_data["progress"],
+        artifacts=run_data["artifacts"],
+        logs=run_data["logs"]
+    )
+
+
+@app.post("/api/uploads")
+async def upload_reference_image(file: UploadFile = File(...)):
+    """
+    Upload reference image for ComfyUI.
+    Saves to app/data/uploads/ and returns filename.
+    """
+    import uuid
+    from pathlib import Path
+
+    # Generate unique filename
+    ext = Path(file.filename).suffix
+    filename = f"ref_{uuid.uuid4().hex}{ext}"
+    filepath = Path("app/data/uploads") / filename
+
+    # Save file
+    with open(filepath, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    logger.info(f"Uploaded reference image: {filename}")
+
+    return {
+        "filename": filename,
+        "path": str(filepath),
+        "size": len(content)
+    }
+
+
+@app.websocket("/ws/{run_id}")
+async def websocket_endpoint(websocket: WebSocket, run_id: str):
+    """
+    WebSocket endpoint for real-time run progress updates.
+    """
+    await websocket.accept()
+
+    if run_id not in websocket_clients:
+        websocket_clients[run_id] = []
+    websocket_clients[run_id].append(websocket)
+
+    logger.info(f"WebSocket connected for run {run_id}")
+
+    try:
+        # Send initial state
+        if run_id in runs:
+            await websocket.send_text(orjson.dumps({
+                "type": "initial_state",
+                "state": runs[run_id]["state"],
+                "progress": runs[run_id]["progress"],
+                "artifacts": runs[run_id]["artifacts"],
+                "logs": runs[run_id]["logs"]
+            }).decode())
+
+        # Keep connection alive
+        while True:
+            data = await websocket.receive_text()
+            # Echo back for ping/pong
+            await websocket.send_text(orjson.dumps({"type": "pong"}).decode())
+
+    except WebSocketDisconnect:
+        websocket_clients[run_id].remove(websocket)
+        logger.info(f"WebSocket disconnected for run {run_id}")
+
+
+async def broadcast_to_websockets(run_id: str, message: dict):
+    """Broadcast message to all WebSocket clients for a run."""
+    if run_id in websocket_clients:
+        dead_clients = []
+        for client in websocket_clients[run_id]:
+            try:
+                await client.send_text(orjson.dumps(message).decode())
+            except Exception as e:
+                logger.error(f"Failed to send to WebSocket: {e}")
+                dead_clients.append(client)
+
+        # Cleanup dead connections
+        for client in dead_clients:
+            websocket_clients[run_id].remove(client)
+
+
+# Helper to update run state (called by Celery tasks)
+def update_run_state(run_id: str, state: str = None, progress: float = None,
+                     artifacts: dict = None, log_message: str = None):
+    """Update run state and broadcast to WebSocket clients."""
+    if run_id not in runs:
+        return
+
+    if state:
+        runs[run_id]["state"] = state
+    if progress is not None:
+        runs[run_id]["progress"] = progress
+    if artifacts:
+        runs[run_id]["artifacts"].update(artifacts)
+    if log_message:
+        runs[run_id]["logs"].append(log_message)
+
+    # Note: In async context, use asyncio.create_task to broadcast
+    # For simplicity, this is a sync function called from Celery
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        reload=settings.ENV == "dev"
+    )

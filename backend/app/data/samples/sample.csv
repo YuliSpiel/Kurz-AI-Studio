@@ -1,0 +1,4 @@
+scene_id,sequence,char_id,char_name,text,emotion,subtitle_text,subtitle_position,duration_ms
+scene_1,1,char_1,주인공,우주선에 탑승했습니다,neutral,우주 여행 시작,bottom,5000
+scene_2,2,char_1,주인공,별들이 정말 아름답네요!,happy,별빛 속으로,top,5000
+scene_3,3,char_1,주인공,이제 새로운 행성으로 향합니다,excited,모험의 시작,bottom,5000
