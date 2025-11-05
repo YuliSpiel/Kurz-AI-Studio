@@ -2,15 +2,26 @@
 FastAPI main application entry point.
 Provides REST API endpoints and WebSocket for AutoShorts orchestration.
 """
-import logging
+
+import logging  # Python 표준 로깅 라이브러리
+import asyncio  # 비동기 작업을 위한 라이브러리
 from contextlib import asynccontextmanager
 from typing import Dict, List
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import (
+    FastAPI,
+    File,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    Depends,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import orjson
+import redis.asyncio as aioredis  # Redis를 비동기적으로 사용하기 위한 라이브러리
 
 from app.config import settings, get_settings
 from app.schemas.run_spec import RunSpec, RunStatus
@@ -24,6 +35,66 @@ logger = logging.getLogger(__name__)
 # In-memory run tracking (production: use Redis/DB)
 runs: Dict[str, dict] = {}
 websocket_clients: Dict[str, List[WebSocket]] = {}
+
+# Redis pub/sub for Celery -> WebSocket communication
+redis_client = None # 서버와 통신하는 객체
+pubsub = None # 구독/수신하는 객체
+'''
+[전역변수 선언 이유] 나중에 lifespan에서 종료 시점에 접근하기 위해서
+    listener_task.cancel()  # 이 함수 취소
+    await redis_client.close()  # ← 전역 변수여야 접근 가능
+'''
+
+
+async def redis_listener(): # Redis에서 진행도 메시지를 받아서 WebSocket 클라이언트들에게 전달하는 중계자
+    """Background task to listen for Redis pub/sub messages and broadcast to WebSockets."""
+    global redis_client, pubsub
+
+    redis_client = await aioredis.from_url(
+        settings.REDIS_URL, encoding="utf-8", decode_responses=True
+    )
+    pubsub = redis_client.pubsub() # 채널 구독/메시지 수신용 객체
+    await pubsub.subscribe("autoshorts:progress")
+
+    logger.info("Redis listener started for progress updates")
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = orjson.loads(message["data"])
+                    run_id = data.get("run_id")
+
+                    if run_id:
+                        # Update in-memory state
+                        if run_id in runs:
+                            if "state" in data:
+                                runs[run_id]["state"] = data["state"]
+                            if "progress" in data:
+                                runs[run_id]["progress"] = data["progress"]
+                            if "log" in data:
+                                runs[run_id]["logs"].append(data["log"])
+
+                        # Broadcast to WebSocket clients
+                        await broadcast_to_websockets(
+                            run_id,
+                            {
+                                "type": "progress",
+                                "run_id": run_id,
+                                "state": data.get("state"),
+                                "progress": data.get("progress"),
+                                "message": data.get("log", ""),
+                            },
+                        )
+
+                        logger.info(f"Broadcasted progress update for {run_id}")
+                except Exception as e:
+                    logger.error(f"Error processing Redis message: {e}")
+    except asyncio.CancelledError:
+        logger.info("Redis listener cancelled")
+    finally:
+        await pubsub.unsubscribe("autoshorts:progress")
+        await redis_client.close()
 
 
 @asynccontextmanager
@@ -40,7 +111,17 @@ async def lifespan(app: FastAPI):
     Path("app/data/outputs").mkdir(parents=True, exist_ok=True)
     Path("app/data/samples").mkdir(parents=True, exist_ok=True)
 
+    # Start Redis listener as background task
+    listener_task = asyncio.create_task(redis_listener())
+
     yield
+
+    # Cleanup
+    listener_task.cancel()
+    try:
+        await listener_task
+    except asyncio.CancelledError:
+        pass
 
     logger.info("Shutting down AutoShorts Backend...")
 
@@ -49,7 +130,7 @@ app = FastAPI(
     title="AutoShorts API",
     description="스토리텔링형 숏츠 자동 제작 시스템",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -69,7 +150,7 @@ async def root():
         "service": "AutoShorts API",
         "version": "0.1.0",
         "status": "running",
-        "environment": settings.ENV
+        "environment": settings.ENV,
     }
 
 
@@ -83,11 +164,22 @@ async def create_run(spec: RunSpec):
     from app.tasks.plan import plan_task
     import uuid
 
-    run_id = str(uuid.uuid4())
+    # 폴더명으로 사용할 run_id 생성: 타임스탬프_프롬프트첫8글자
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    prompt_clean = "".join(c for c in spec.prompt if not c.isspace())[:8]
+    run_id = f"{timestamp}_{prompt_clean}"
+
     logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
 
     # Initialize FSM
     fsm = FSM(run_id)
+
+    # Register FSM in global registry (중요!)
+    from app.orchestrator.fsm import register_fsm
+
+    register_fsm(fsm)
 
     # Store run metadata
     runs[run_id] = {
@@ -107,18 +199,21 @@ async def create_run(spec: RunSpec):
         # Kick off planning task asynchronously
         plan_task.apply_async(args=[run_id, spec.model_dump()])
 
-        await broadcast_to_websockets(run_id, {
-            "type": "state_change",
-            "state": fsm.current_state.value,
-            "message": "Run created, starting plot planning..."
-        })
+        await broadcast_to_websockets(
+            run_id,
+            {
+                "type": "state_change",
+                "state": fsm.current_state.value,
+                "message": "Run created, starting plot planning...",
+            },
+        )
 
     return RunStatus(
         run_id=run_id,
         state=fsm.current_state.value,
         progress=0.0,
         artifacts=runs[run_id]["artifacts"],
-        logs=runs[run_id]["logs"]
+        logs=runs[run_id]["logs"],
     )
 
 
@@ -134,7 +229,7 @@ async def get_run(run_id: str):
         state=run_data["state"],
         progress=run_data["progress"],
         artifacts=run_data["artifacts"],
-        logs=run_data["logs"]
+        logs=run_data["logs"],
     )
 
 
@@ -159,11 +254,7 @@ async def upload_reference_image(file: UploadFile = File(...)):
 
     logger.info(f"Uploaded reference image: {filename}")
 
-    return {
-        "filename": filename,
-        "path": str(filepath),
-        "size": len(content)
-    }
+    return {"filename": filename, "path": str(filepath), "size": len(content)}
 
 
 @app.websocket("/ws/{run_id}")
@@ -182,13 +273,17 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str):
     try:
         # Send initial state
         if run_id in runs:
-            await websocket.send_text(orjson.dumps({
-                "type": "initial_state",
-                "state": runs[run_id]["state"],
-                "progress": runs[run_id]["progress"],
-                "artifacts": runs[run_id]["artifacts"],
-                "logs": runs[run_id]["logs"]
-            }).decode())
+            await websocket.send_text(
+                orjson.dumps(
+                    {
+                        "type": "initial_state",
+                        "state": runs[run_id]["state"],
+                        "progress": runs[run_id]["progress"],
+                        "artifacts": runs[run_id]["artifacts"],
+                        "logs": runs[run_id]["logs"],
+                    }
+                ).decode()
+            )
 
         # Keep connection alive
         while True:
@@ -218,8 +313,13 @@ async def broadcast_to_websockets(run_id: str, message: dict):
 
 
 # Helper to update run state (called by Celery tasks)
-def update_run_state(run_id: str, state: str = None, progress: float = None,
-                     artifacts: dict = None, log_message: str = None):
+def update_run_state(
+    run_id: str,
+    state: str = None,
+    progress: float = None,
+    artifacts: dict = None,
+    log_message: str = None,
+):
     """Update run state and broadcast to WebSocket clients."""
     if run_id not in runs:
         return
@@ -239,9 +339,7 @@ def update_run_state(run_id: str, state: str = None, progress: float = None,
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
-        "app.main:app",
-        host=settings.API_HOST,
-        port=settings.API_PORT,
-        reload=settings.ENV == "dev"
+        "app.main:app", host=settings.API_HOST, port=settings.API_PORT, reload=settings.ENV == "dev"
     )
