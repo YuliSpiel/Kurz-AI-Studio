@@ -109,7 +109,8 @@ def convert_plot_to_json(
     for scene_id, scene_rows in sorted(scenes_data.items(), key=lambda x: int(x[0].split("_")[1])):
         first_row = scene_rows[0]
         sequence = int(scene_id.split("_")[1])
-        duration_ms = int(first_row["duration_ms"])
+        # duration_ms with fallback to default 5000ms
+        duration_ms = int(first_row.get("duration_ms") or 5000)
         total_duration += duration_ms
 
         # Create dialogue lines
