@@ -46,7 +46,7 @@ def plan_task(self, run_id: str, spec: dict):
         # Step 1: Generate characters and plot
         logger.info(f"[{run_id}] Generating characters and plot from prompt...")
         publish_progress(run_id, progress=0.12, log="캐릭터 및 시나리오 생성 중 (GPT-4o-mini)...")
-        characters_path, csv_path = generate_plot_with_characters(
+        characters_path, plot_json_path = generate_plot_with_characters(
             run_id=run_id,
             prompt=spec["prompt"],
             num_characters=spec["num_characters"],
@@ -54,26 +54,26 @@ def plan_task(self, run_id: str, spec: dict):
             mode=spec["mode"]
         )
         logger.info(f"[{run_id}] Characters generated: {characters_path}")
-        logger.info(f"[{run_id}] Plot CSV generated: {csv_path}")
+        logger.info(f"[{run_id}] Plot JSON generated: {plot_json_path}")
         publish_progress(run_id, progress=0.15, log=f"캐릭터 & 시나리오 생성 완료")
 
-        # Step 2: Convert CSV to JSON
-        logger.info(f"[{run_id}] Converting CSV to JSON...")
+        # Step 2: Convert plot.json to layout.json
+        logger.info(f"[{run_id}] Converting plot.json to layout.json...")
         publish_progress(run_id, progress=0.17, log="JSON 레이아웃 변환 중...")
         json_path = convert_plot_to_json(
-            csv_path=csv_path,
+            plot_json_path=str(plot_json_path),
             run_id=run_id,
             art_style=spec.get("art_style", "파스텔 수채화"),
             music_genre=spec.get("music_genre", "ambient")
         )
-        logger.info(f"[{run_id}] JSON generated: {json_path}")
+        logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
         publish_progress(run_id, progress=0.2, log=f"JSON 레이아웃 생성 완료: {json_path}")
 
         # Update FSM artifacts
         from app.main import runs
         if run_id in runs:
             runs[run_id]["artifacts"]["characters_path"] = str(characters_path)
-            runs[run_id]["artifacts"]["csv_path"] = str(csv_path)
+            runs[run_id]["artifacts"]["plot_json_path"] = str(plot_json_path)
             runs[run_id]["artifacts"]["json_path"] = str(json_path)
             runs[run_id]["progress"] = 0.2
 
@@ -110,7 +110,7 @@ def plan_task(self, run_id: str, spec: dict):
 
         return {
             "run_id": run_id,
-            "csv_path": str(csv_path),
+            "plot_json_path": str(plot_json_path),
             "json_path": str(json_path),
             "status": "success"
         }
