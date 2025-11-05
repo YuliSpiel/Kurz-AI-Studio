@@ -1,9 +1,8 @@
 """
 Plot generation utilities with character separation.
-Generates characters.json and plot.csv from user prompts.
+Generates characters.json and plot.json from user prompts.
 """
 import logging
-import csv
 import json
 from pathlib import Path
 from typing import Tuple
@@ -19,7 +18,7 @@ def generate_plot_with_characters(
     mode: str = "story"
 ) -> Tuple[Path, Path]:
     """
-    Generate characters.json and plot.csv from user prompt using GPT-4o-mini.
+    Generate characters.json and plot.json from user prompt using GPT-4o-mini.
 
     Args:
         run_id: Run identifier
@@ -29,7 +28,7 @@ def generate_plot_with_characters(
         mode: story or ad
 
     Returns:
-        Tuple of (characters_json_path, plot_csv_path)
+        Tuple of (characters_json_path, plot_json_path)
     """
     logger.info(f"Generating plot with characters for: {prompt[:50]}...")
 

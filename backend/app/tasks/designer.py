@@ -161,7 +161,7 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                             seed=seed,
                             width=512,
                             height=768,  # 9:16 ratio
-                            output_prefix=f"{run_id}_{scene_id}_{slot_id}"
+                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
                         )
                     elif provider == "comfyui":
                         image_path = client.generate_image(
@@ -170,7 +170,7 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                             lora_name=settings.ART_STYLE_LORA,
                             lora_strength=spec.get("lora_strength", 0.8),
                             reference_images=spec.get("reference_images", []),
-                            output_prefix=f"{run_id}_{scene_id}_{slot_id}"
+                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
                         )
                 else:
                     # Create stub image (1x1 pixel PNG)

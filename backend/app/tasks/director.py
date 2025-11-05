@@ -49,9 +49,64 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 runs[run_id]["state"] = fsm.current_state.value
                 runs[run_id]["progress"] = 0.7
 
-        # Load JSON with all asset URLs
+        # Load JSON
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
+
+        # IMPORTANT: Update layout.json with asset URLs from chord results
+        # This fixes race condition where parallel tasks overwrite each other's changes
+        logger.info(f"[{run_id}] Updating layout.json with asset URLs from chord results...")
+
+        for result in asset_results:
+            if not result or "agent" not in result:
+                continue
+
+            agent = result["agent"]
+
+            # Update image URLs from designer
+            if agent == "designer" and "images" in result:
+                for img_result in result["images"]:
+                    scene_id = img_result["scene_id"]
+                    slot_id = img_result["slot_id"]
+                    image_url = img_result["image_url"]
+
+                    # Find scene and update image_url
+                    for scene in layout.get("scenes", []):
+                        if scene["scene_id"] == scene_id:
+                            for img_slot in scene.get("images", []):
+                                if img_slot["slot_id"] == slot_id:
+                                    img_slot["image_url"] = image_url
+                                    logger.info(f"[{run_id}] Updated {scene_id}/{slot_id}: {image_url}")
+
+            # Update audio URLs from voice
+            elif agent == "voice" and "voice" in result:
+                for voice_result in result["voice"]:
+                    scene_id = voice_result["scene_id"]
+                    line_id = voice_result["line_id"]
+                    audio_url = voice_result["audio_url"]
+
+                    # Find scene and text line, update audio_url
+                    for scene in layout.get("scenes", []):
+                        if scene["scene_id"] == scene_id:
+                            for text_line in scene.get("texts", []):
+                                if text_line["line_id"] == line_id:
+                                    text_line["audio_url"] = audio_url
+                                    logger.info(f"[{run_id}] Updated {scene_id}/{line_id}: {audio_url}")
+
+            # Update BGM from composer
+            elif agent == "composer" and "audio" in result:
+                for audio_result in result["audio"]:
+                    if audio_result["type"] == "bgm":
+                        bgm_path = audio_result["path"]
+                        if layout.get("global_bgm"):
+                            layout["global_bgm"]["audio_url"] = bgm_path
+                            logger.info(f"[{run_id}] Updated global BGM: {bgm_path}")
+
+        # Save updated layout.json
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(layout, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"[{run_id}] Layout JSON updated with all asset URLs")
 
         # Check if we're in stub mode (no real assets)
         from app.config import settings
