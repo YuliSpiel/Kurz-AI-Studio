@@ -59,21 +59,24 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
             voice_profile = spec.get("voice_id") or char.get("voice_profile", "default")
             char_voices[char_id] = voice_profile
 
-        # Generate TTS for each dialogue line
+        # Generate TTS for each text line
         for scene in layout.get("scenes", []):
             scene_id = scene["scene_id"]
 
-            for dialogue in scene.get("dialogue", []):
-                line_id = dialogue["line_id"]
-                char_id = dialogue["char_id"]
-                text = dialogue["text"]
-                emotion = dialogue.get("emotion", "neutral")
+            for text_line in scene.get("texts", []):
+                line_id = text_line["line_id"]
+                char_id = text_line["char_id"]
+                text = text_line["text"]
+                emotion = text_line.get("emotion", "neutral")
+
+                # Remove quotes for TTS generation (quotes are only for display)
+                tts_text = text.strip('"')
 
                 voice_profile = char_voices.get(char_id, "default")
 
                 logger.info(
                     f"[{run_id}] Generating TTS for {scene_id}/{line_id}: "
-                    f"{text[:30]}... (voice={voice_profile}, emotion={emotion})"
+                    f"{tts_text[:30]}... (voice={voice_profile}, emotion={emotion})"
                 )
 
                 # Generate TTS in run_id folder
@@ -81,14 +84,14 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
                 audio_dir.mkdir(parents=True, exist_ok=True)
 
                 audio_path = client.generate_speech(
-                    text=text,
+                    text=tts_text,
                     voice_id=voice_profile,
                     emotion=emotion,
                     output_filename=str(audio_dir / f"{scene_id}_{line_id}.mp3")
                 )
 
                 # Update JSON
-                dialogue["audio_url"] = str(audio_path)
+                text_line["audio_url"] = str(audio_path)
 
                 voice_results.append({
                     "scene_id": scene_id,

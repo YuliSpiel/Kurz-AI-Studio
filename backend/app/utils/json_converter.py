@@ -56,7 +56,7 @@ def convert_plot_to_json(
     # Build JSON structure
     from app.schemas.json_layout import (
         ShortsJSON, Timeline, Character, Scene, ImageSlot,
-        Subtitle, DialogueLine, BGM
+        TextLine, BGM
     )
 
     # Build characters list
@@ -110,34 +110,26 @@ def convert_plot_to_json(
         duration_ms = int(first_row.get("duration_ms") or 5000)
         total_duration += duration_ms
 
-        # Create dialogue lines
-        dialogue = []
+        # Create text lines (통합: 대사 + 해설)
+        texts = []
         for idx, row in enumerate(scene_rows):
             line_id = f"{scene_id}_line_{idx+1}"
-            dialogue.append(
-                DialogueLine(
+            text = row["text"]
+            text_type = row.get("text_type", "dialogue")
+
+            # text_type이 dialogue일 경우에만 큰따옴표 추가
+            display_text = f'"{text}"' if text_type == "dialogue" else text
+
+            texts.append(
+                TextLine(
                     line_id=line_id,
                     char_id=row["char_id"],
-                    text=row["text"],
+                    text=display_text,
+                    text_type=text_type,
                     emotion=row.get("emotion", "neutral"),
-                    audio_url="",
+                    position=row.get("subtitle_position", "bottom"),
+                    audio_url="",  # Will be filled by voice task
                     start_ms=idx * 2000,
-                    duration_ms=2000
-                ).model_dump()
-            )
-
-        # Create subtitles
-        subtitles = []
-        if first_row.get("text"):
-            text = first_row["text"]
-            text_type = first_row.get("text_type", "dialogue")
-            subtitle_text = f'"{text}"' if text_type == "dialogue" else text
-
-            subtitles.append(
-                Subtitle(
-                    position=first_row.get("subtitle_position", "bottom"),
-                    text=subtitle_text,
-                    start_ms=0,
                     duration_ms=duration_ms
                 ).model_dump()
             )
@@ -197,8 +189,7 @@ def convert_plot_to_json(
             sequence=sequence,
             duration_ms=duration_ms,
             images=images,
-            subtitles=subtitles,
-            dialogue=dialogue,
+            texts=texts,
             bgm=None,
             sfx=sfx_list,
             bg_seed=generate_bg_seed(sequence),

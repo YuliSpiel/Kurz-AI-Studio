@@ -69,7 +69,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 duration_sec = scene["duration_ms"] / 1000.0
                 logger.info(f"[{run_id}]   - {scene_id}: {duration_sec}s")
                 logger.info(f"[{run_id}]     Images: {len(scene.get('images', []))}")
-                logger.info(f"[{run_id}]     Dialogue: {len(scene.get('dialogue', []))}")
+                logger.info(f"[{run_id}]     Texts: {len(scene.get('texts', []))}")
 
             global_bgm = layout.get("global_bgm")
             if global_bgm:
@@ -95,9 +95,10 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     for img_slot in scene.get("images", []):
                         f.write(f"  Image ({img_slot.get('slot_id', 'N/A')}): {img_slot.get('image_url', 'N/A')}\n")
 
-                    for dialogue in scene.get("dialogue", []):
-                        f.write(f"  Audio: {dialogue.get('audio_url', 'N/A')}\n")
-                        f.write(f"    Text: {dialogue.get('text', 'N/A')}\n")
+                    for text_line in scene.get("texts", []):
+                        f.write(f"  Audio: {text_line.get('audio_url', 'N/A')}\n")
+                        f.write(f"    Text: {text_line.get('text', 'N/A')}\n")
+                        f.write(f"    Type: {text_line.get('text_type', 'N/A')}\n")
 
                 if global_bgm:
                     f.write(f"\nGlobal BGM: {global_bgm.get('audio_url', 'N/A')}\n")
@@ -192,10 +193,11 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             # Composite video
             video_clip = CompositeVideoClip(image_clips, size=(width, height))
 
-            # Add subtitles (simplified - use TextClip)
-            for subtitle in scene.get("subtitles", []):
+            # Add text overlays (subtitles) - simplified
+            for text_line in scene.get("texts", []):
                 # MoviePy TextClip requires ImageMagick (complex setup)
                 # For now, skip or use simple overlay
+                # TODO: Add TextClip with text_line["text"], text_line["position"]
                 pass
 
             scenes_clips.append(video_clip)
@@ -215,13 +217,13 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 bgm_clip = AudioFileClip(bgm_path).with_volume_scaled(global_bgm.get("volume", 0.3))
                 audio_clips.append(bgm_clip)
 
-        # Dialogue audio (simplified - just add sequentially)
+        # Text audio (voice/narration) - simplified
         for scene in layout.get("scenes", []):
-            for dialogue in scene.get("dialogue", []):
-                audio_url = dialogue.get("audio_url")
+            for text_line in scene.get("texts", []):
+                audio_url = text_line.get("audio_url")
                 if audio_url and Path(audio_url).exists():
                     voice_clip = AudioFileClip(audio_url)
-                    # Set start time based on dialogue["start_ms"]
+                    # Set start time based on text_line["start_ms"]
                     # For simplicity, add to composite
                     audio_clips.append(voice_clip)
 

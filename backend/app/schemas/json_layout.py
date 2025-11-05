@@ -24,13 +24,17 @@ class ImageSlot(BaseModel):
     z_index: int = Field(default=0, description="레이어 순서")
 
 
-class Subtitle(BaseModel):
-    """Subtitle definition."""
-    position: Literal["top", "center", "bottom"]
+class TextLine(BaseModel):
+    """Text line (dialogue or narration) with timing and display info."""
+    line_id: str
+    char_id: str
     text: str
-    style: str = Field(default="default", description="스타일 프리셋")
-    start_ms: int = Field(description="자막 시작 시간(ms)")
-    duration_ms: int = Field(description="자막 지속 시간(ms)")
+    text_type: Literal["dialogue", "narration"] = Field(description="대사 또는 해설 구분")
+    emotion: str = Field(default="neutral", description="감정 (예: neutral, happy, sad)")
+    position: Literal["top", "center", "bottom"] = Field(default="bottom", description="자막 위치")
+    audio_url: str = Field(default="", description="TTS 음성 파일 경로")
+    start_ms: int
+    duration_ms: int
 
 
 class SFX(BaseModel):
@@ -42,15 +46,9 @@ class SFX(BaseModel):
     volume: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
-class DialogueLine(BaseModel):
-    """Dialogue line with timing."""
-    line_id: str
-    char_id: str
-    text: str
-    emotion: str = Field(default="neutral", description="감정 (예: neutral, happy, sad)")
-    audio_url: str = Field(description="TTS 음성 파일 경로")
-    start_ms: int
-    duration_ms: int
+# Backward compatibility aliases (deprecated)
+Subtitle = TextLine  # Deprecated: use TextLine instead
+DialogueLine = TextLine  # Deprecated: use TextLine instead
 
 
 class BGM(BaseModel):
@@ -72,16 +70,28 @@ class Scene(BaseModel):
 
     # Visual
     images: List[ImageSlot] = Field(description="이미지 슬롯 배치")
-    subtitles: List[Subtitle] = Field(default_factory=list)
+
+    # Text (통합: 대사 + 해설)
+    texts: List[TextLine] = Field(default_factory=list, description="대사/해설 텍스트 (text_type으로 구분)")
 
     # Audio
-    dialogue: List[DialogueLine] = Field(default_factory=list)
     bgm: Optional[BGM] = None
     sfx: List[SFX] = Field(default_factory=list)
 
     # Scene settings
     bg_seed: int = Field(description="배경 seed")
     transition: str = Field(default="fade", description="전환 효과")
+
+    # Backward compatibility (deprecated, will be removed)
+    @property
+    def dialogue(self) -> List[TextLine]:
+        """Deprecated: use texts instead."""
+        return [t for t in self.texts if t.text_type == "dialogue"]
+
+    @property
+    def subtitles(self) -> List[TextLine]:
+        """Deprecated: use texts instead."""
+        return self.texts
 
 
 class Timeline(BaseModel):
