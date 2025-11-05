@@ -192,11 +192,11 @@ async def create_run(spec: RunSpec):
         "created_at": None,  # Add timestamp in production
     }
 
-    # Transition to PLOT_PLANNING and start async task
-    if fsm.transition_to(RunState.PLOT_PLANNING):
+    # Transition to PLOT_GENERATION and start async task
+    if fsm.transition_to(RunState.PLOT_GENERATION):
         runs[run_id]["state"] = fsm.current_state.value
 
-        # Kick off planning task asynchronously
+        # Kick off plot generation task asynchronously
         plan_task.apply_async(args=[run_id, spec.model_dump()])
 
         await broadcast_to_websockets(
@@ -204,7 +204,7 @@ async def create_run(spec: RunSpec):
             {
                 "type": "state_change",
                 "state": fsm.current_state.value,
-                "message": "Run created, starting plot planning...",
+                "message": "Run created, starting plot generation...",
             },
         )
 

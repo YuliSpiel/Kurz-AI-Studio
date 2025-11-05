@@ -29,8 +29,8 @@ def plan_task(self, run_id: str, spec: dict):
         run_id: Run identifier
         spec: RunSpec as dict
     """
-    logger.info(f"[{run_id}] Starting plot planning...")
-    publish_progress(run_id, state="PLOT_PLANNING", progress=0.1, log="기획 시작: 프롬프트 분석 중...")
+    logger.info(f"[{run_id}] Starting plot generation...")
+    publish_progress(run_id, state="PLOT_GENERATION", progress=0.1, log="플롯 생성 시작: 프롬프트 분석 중...")
 
     try:
         # TEST: 3초 대기
