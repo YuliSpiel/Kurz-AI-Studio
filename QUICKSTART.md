@@ -29,8 +29,8 @@ docker-compose up -d redis
 **터미널 2: Celery Worker**
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+#python -m venv kvenv
+source kvenv/bin/activate
 pip install -r requirements.txt
 celery -A app.celery_app worker --loglevel=info --pool=solo
 ```
@@ -38,7 +38,7 @@ celery -A app.celery_app worker --loglevel=info --pool=solo
 **터미널 3: FastAPI**
 ```bash
 cd backend
-source .venv/bin/activate
+source kvenv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
