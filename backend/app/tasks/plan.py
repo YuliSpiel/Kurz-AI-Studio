@@ -8,7 +8,8 @@ from celery import chord, group
 
 from app.celery_app import celery
 from app.orchestrator.fsm import RunState, get_fsm
-from app.utils.csv_to_json import generate_csv_from_prompt, csv_to_json
+from app.utils.plot_generator import generate_plot_with_characters
+from app.utils.json_converter import convert_plot_to_json
 from app.utils.progress import publish_progress
 
 logger = logging.getLogger(__name__)
@@ -42,23 +43,24 @@ def plan_task(self, run_id: str, spec: dict):
         if not fsm:
             raise ValueError(f"FSM not found for run {run_id}")
 
-        # Step 1: Generate CSV
-        logger.info(f"[{run_id}] Generating CSV from prompt...")
-        publish_progress(run_id, progress=0.12, log="시나리오 생성 중 (GPT-4o-mini)...")
-        csv_path = generate_csv_from_prompt(
+        # Step 1: Generate characters and plot
+        logger.info(f"[{run_id}] Generating characters and plot from prompt...")
+        publish_progress(run_id, progress=0.12, log="캐릭터 및 시나리오 생성 중 (GPT-4o-mini)...")
+        characters_path, csv_path = generate_plot_with_characters(
             run_id=run_id,
             prompt=spec["prompt"],
             num_characters=spec["num_characters"],
             num_cuts=spec["num_cuts"],
             mode=spec["mode"]
         )
-        logger.info(f"[{run_id}] CSV generated: {csv_path}")
-        publish_progress(run_id, progress=0.15, log=f"시나리오 CSV 생성 완료: {csv_path}")
+        logger.info(f"[{run_id}] Characters generated: {characters_path}")
+        logger.info(f"[{run_id}] Plot CSV generated: {csv_path}")
+        publish_progress(run_id, progress=0.15, log=f"캐릭터 & 시나리오 생성 완료")
 
         # Step 2: Convert CSV to JSON
         logger.info(f"[{run_id}] Converting CSV to JSON...")
         publish_progress(run_id, progress=0.17, log="JSON 레이아웃 변환 중...")
-        json_path = csv_to_json(
+        json_path = convert_plot_to_json(
             csv_path=csv_path,
             run_id=run_id,
             art_style=spec.get("art_style", "파스텔 수채화"),
@@ -70,6 +72,7 @@ def plan_task(self, run_id: str, spec: dict):
         # Update FSM artifacts
         from app.main import runs
         if run_id in runs:
+            runs[run_id]["artifacts"]["characters_path"] = str(characters_path)
             runs[run_id]["artifacts"]["csv_path"] = str(csv_path)
             runs[run_id]["artifacts"]["json_path"] = str(json_path)
             runs[run_id]["progress"] = 0.2

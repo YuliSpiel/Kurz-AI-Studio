@@ -1,0 +1,20 @@
+{
+  "characters": [
+    {
+      "char_id": "char_1",
+      "name": "해설자",
+      "appearance": "음성만 있는 해설자 (이미지 없음)",
+      "personality": "차분하고 이야기를 잘 전달하는",
+      "voice_profile": "narrator",
+      "seed": 1001
+    },
+    {
+      "char_id": "char_2",
+      "name": "주인공",
+      "appearance": "용감한 모험가, 갈색 머리, 빨간 망토",
+      "personality": "두려움 없고 정의로운",
+      "voice_profile": "default",
+      "seed": 1002
+    }
+  ]
+}
