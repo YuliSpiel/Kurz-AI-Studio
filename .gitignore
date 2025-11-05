@@ -45,6 +45,7 @@ backend/app/data/uploads/*
 backend/app/data/outputs/*
 !backend/app/data/outputs/csv_files/
 backend/app/data/outputs/csv_files/*.csv
+backend/app/data/*_test/
 !backend/app/data/.gitkeep
 !backend/app/data/samples/
 
