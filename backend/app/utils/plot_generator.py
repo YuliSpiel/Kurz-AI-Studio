@@ -37,7 +37,7 @@ def generate_plot_with_characters(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     characters_path = output_dir / "characters.json"
-    plot_path = output_dir / "plot.csv"
+    plot_path = output_dir / "plot.json"
 
     try:
         from openai import OpenAI
@@ -104,7 +104,7 @@ JSON 형식:
 
         logger.info(f"✅ Characters generated: {characters_path}")
 
-        # Step 2: Generate plot CSV
+        # Step 2: Generate plot JSON
         char_names = ", ".join([c["name"] for c in characters_data["characters"]])
 
         plot_prompt = f"""당신은 숏폼 영상 콘텐츠 시나리오 작가입니다.
@@ -112,7 +112,7 @@ JSON 형식:
 
 등장인물: {char_names}
 
-각 장면마다 다음을 포함해야 합니다:
+각 장면마다 다음 정보를 JSON 형식으로 제공하세요:
 - scene_id: scene_1, scene_2, ... 형식
 - char_id: char_1, char_2 (등장인물 ID)
 - expression: 표정 (excited, happy, sad, angry, surprised, neutral, amazed, confident, brave 등)
@@ -124,12 +124,36 @@ JSON 형식:
 - duration_ms: 장면 지속시간 (4000-6000)
 
 **중요**:
-- 반드시 CSV 형식으로만 출력
-- text 필드에 큰따옴표 넣지 말것
-- 해설자의 expression/pose는 none으로 설정
+- 반드시 JSON 형식으로만 출력
+- 해설자의 expression/pose는 "none"으로 설정
 
-CSV 형식:
-scene_id,char_id,expression,pose,text,text_type,emotion,subtitle_position,duration_ms"""
+JSON 형식:
+{{
+  "scenes": [
+    {{
+      "scene_id": "scene_1",
+      "char_id": "char_1",
+      "expression": "excited",
+      "pose": "standing",
+      "text": "안녕! 나는 용감한 고양이야!",
+      "text_type": "dialogue",
+      "emotion": "happy",
+      "subtitle_position": "top",
+      "duration_ms": 5000
+    }},
+    {{
+      "scene_id": "scene_2",
+      "char_id": "char_2",
+      "expression": "happy",
+      "pose": "walking",
+      "text": "우주로 출발하자!",
+      "text_type": "dialogue",
+      "emotion": "excited",
+      "subtitle_position": "bottom",
+      "duration_ms": 4500
+    }}
+  ]
+}}"""
 
         logger.info("Step 2: Generating plot...")
         plot_response = client.chat.completions.create(
@@ -139,27 +163,23 @@ scene_id,char_id,expression,pose,text,text_type,emotion,subtitle_position,durati
                 {"role": "user", "content": prompt}
             ],
             temperature=0.8,
-            max_tokens=1500
+            max_tokens=2000
         )
 
-        plot_csv_content = plot_response.choices[0].message.content.strip()
+        plot_json_content = plot_response.choices[0].message.content.strip()
 
         # Remove markdown code blocks if present
-        if plot_csv_content.startswith("```"):
-            lines = plot_csv_content.split("\n")
-            plot_csv_content = "\n".join([line for line in lines if not line.startswith("```")])
+        if plot_json_content.startswith("```"):
+            lines = plot_json_content.split("\n")
+            plot_json_content = "\n".join([line for line in lines if not line.startswith("```")])
 
-        # Save plot CSV
+        # Parse and save plot JSON
+        plot_data = json.loads(plot_json_content)
         with open(plot_path, "w", encoding="utf-8") as f:
-            f.write(plot_csv_content.strip())
+            json.dump(plot_data, f, indent=2, ensure_ascii=False)
 
         logger.info(f"✅ Plot generated: {plot_path}")
-
-        # Validate
-        with open(plot_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            logger.info(f"Generated {len(rows)} scenes")
+        logger.info(f"Generated {len(plot_data.get('scenes', []))} scenes")
 
         return characters_path, plot_path
 
@@ -179,7 +199,7 @@ def _generate_fallback(
     Fallback: rule-based generation when GPT fails.
     """
     characters_path = output_dir / "characters.json"
-    plot_path = output_dir / "plot.csv"
+    plot_path = output_dir / "plot.json"
 
     # Generate simple characters
     characters = {
@@ -200,12 +220,12 @@ def _generate_fallback(
         json.dump(characters, f, indent=2, ensure_ascii=False)
 
     # Generate simple plot
-    rows = []
+    scenes = []
     for i in range(num_cuts):
         scene_id = f"scene_{i+1}"
         char_id = f"char_{(i % num_characters) + 1}"
 
-        rows.append({
+        scenes.append({
             "scene_id": scene_id,
             "char_id": char_id,
             "expression": "neutral",
@@ -217,14 +237,9 @@ def _generate_fallback(
             "duration_ms": 5000
         })
 
-    with open(plot_path, "w", encoding="utf-8", newline="") as f:
-        fieldnames = [
-            "scene_id", "char_id", "expression", "pose", "text",
-            "text_type", "emotion", "subtitle_position", "duration_ms"
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    plot_data = {"scenes": scenes}
+    with open(plot_path, "w", encoding="utf-8") as f:
+        json.dump(plot_data, f, indent=2, ensure_ascii=False)
 
     logger.info(f"✅ Fallback generation complete")
     return characters_path, plot_path

@@ -2,7 +2,6 @@
 JSON conversion utilities with characters.json support.
 """
 import logging
-import csv
 import json
 from pathlib import Path
 from typing import List, Dict
@@ -14,16 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 def convert_plot_to_json(
-    csv_path: str,
+    plot_json_path: str,
     run_id: str,
     art_style: str = "파스텔 수채화",
     music_genre: str = "ambient"
 ) -> Path:
     """
-    Convert plot CSV and characters.json to final layout JSON.
+    Convert plot JSON and characters.json to final layout JSON.
 
     Args:
-        csv_path: Path to plot CSV file
+        plot_json_path: Path to plot JSON file
         run_id: Run identifier
         art_style: Art style for image generation
         music_genre: Music genre for BGM
@@ -31,10 +30,10 @@ def convert_plot_to_json(
     Returns:
         Path to generated JSON file
     """
-    logger.info(f"Converting plot to JSON: {csv_path}")
+    logger.info(f"Converting plot to JSON: {plot_json_path}")
 
-    csv_path = Path(csv_path)
-    characters_json_path = csv_path.parent / "characters.json"
+    plot_json_path = Path(plot_json_path)
+    characters_json_path = plot_json_path.parent / "characters.json"
 
     # Read characters.json
     characters_data = []
@@ -44,16 +43,15 @@ def convert_plot_to_json(
             char_json = json.load(f)
             characters_data = char_json.get("characters", [])
     else:
-        logger.warning(f"characters.json not found, will extract from CSV")
+        logger.warning(f"characters.json not found")
 
-    # Read plot CSV
-    rows = []
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+    # Read plot JSON
+    with open(plot_json_path, "r", encoding="utf-8") as f:
+        plot_data = json.load(f)
 
+    rows = plot_data.get("scenes", [])
     if not rows:
-        raise ValueError("CSV is empty")
+        raise ValueError("Plot JSON has no scenes")
 
     # Build JSON structure
     from app.schemas.json_layout import (
@@ -76,11 +74,10 @@ def convert_plot_to_json(
                 ).model_dump()
             )
     else:
-        # Fallback: extract from CSV (old behavior)
+        # Fallback: extract from plot JSON
         characters_set = set()
         for row in rows:
             char_id = row["char_id"]
-            # Try char_name field (old CSV format)
             char_name = row.get("char_name", "Character")
             characters_set.add((char_id, char_name))
 
@@ -230,13 +227,13 @@ def convert_plot_to_json(
         metadata={
             "art_style": art_style,
             "music_genre": music_genre,
-            "generated_from": str(csv_path),
+            "generated_from": str(plot_json_path),
             "characters_file": str(characters_json_path) if characters_json_path.exists() else None
         }
     )
 
     # Write JSON
-    json_path = csv_path.parent / "layout.json"
+    json_path = plot_json_path.parent / "layout.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(shorts_json.model_dump(), f, indent=2, ensure_ascii=False)
 
