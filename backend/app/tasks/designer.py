@@ -41,21 +41,18 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
         client = None
         provider = settings.IMAGE_PROVIDER
 
-        if provider == "banana":
-            # Banana provider
-            if settings.BANANA_API_KEY and settings.BANANA_MODEL_KEY:
+        if provider == "gemini":
+            # Gemini (Nano Banana) provider
+            if settings.GEMINI_API_KEY:
                 try:
-                    from app.providers.images.banana_client import BananaClient
-                    client = BananaClient(
-                        api_key=settings.BANANA_API_KEY,
-                        model_key=settings.BANANA_MODEL_KEY
-                    )
-                    logger.info(f"[{run_id}] Using Banana image provider")
+                    from app.providers.images.gemini_image_client import GeminiImageClient
+                    client = GeminiImageClient(api_key=settings.GEMINI_API_KEY)
+                    logger.info(f"[{run_id}] Using Gemini (Nano Banana) image provider")
                 except Exception as e:
-                    logger.warning(f"Banana not available: {e}, using stub images")
+                    logger.warning(f"Gemini not available: {e}, using stub images")
                     client = None
             else:
-                logger.warning("BANANA_API_KEY or BANANA_MODEL_KEY not set, using stub")
+                logger.warning("GEMINI_API_KEY not set, using stub")
 
         elif provider == "comfyui":
             # ComfyUI provider
@@ -113,7 +110,7 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
 
                 if client:
                     # Generate image based on provider type
-                    if provider == "banana":
+                    if provider == "gemini":
                         image_path = client.generate_image(
                             prompt=prompt,
                             seed=seed,
