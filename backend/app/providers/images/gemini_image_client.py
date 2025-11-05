@@ -106,9 +106,17 @@ class GeminiImageClient:
                     raise ValueError(f"Failed to decode image: {e}")
 
                 # Save image
-                output_dir = Path("backend/app/data/outputs/images")
-                output_dir.mkdir(parents=True, exist_ok=True)
-                output_path = output_dir / f"{output_prefix}.png"
+                # Check if output_prefix contains path separators (full path)
+                prefix_path = Path(output_prefix)
+                if "/" in output_prefix or "\\" in output_prefix:
+                    # Full path provided, use it directly
+                    output_path = prefix_path.with_suffix(".png")
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    # Only filename provided, use default directory
+                    output_dir = Path("backend/app/data/outputs/images")
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    output_path = output_dir / f"{output_prefix}.png"
 
                 with open(output_path, "wb") as f:
                     f.write(image_bytes)
