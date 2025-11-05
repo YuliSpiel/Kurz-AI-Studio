@@ -7,6 +7,7 @@ import csv
 import json
 from pathlib import Path
 from typing import List, Dict
+from datetime import datetime
 
 from app.utils.seeds import generate_char_seed, generate_bg_seed
 from app.utils.sfx_tags import extract_sfx_tags
@@ -22,10 +23,7 @@ def generate_csv_from_prompt(
     mode: str = "story"
 ) -> Path:
     """
-    Generate plot CSV from user prompt.
-
-    This is a placeholder implementation. In production, this would use
-    an LLM (e.g., GPT-4) to generate structured plot data.
+    Generate plot CSV from user prompt using GPT-4o-mini.
 
     Args:
         run_id: Run identifier
@@ -39,59 +37,123 @@ def generate_csv_from_prompt(
     """
     logger.info(f"Generating CSV for prompt: {prompt[:50]}...")
 
-    # Output path
-    output_dir = Path("app/data/outputs")
+    # run_id가 이미 타임스탬프_프롬프트 형식으로 전달됨
+    output_dir = Path(f"app/data/outputs/{run_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"{run_id}_plot.csv"
 
-    # Generate simple plot structure (rule-based for now)
-    # CSV columns: scene_id, sequence, char_id, text, emotion, subtitle_text, subtitle_position, duration_ms
+    csv_filename = "plot.csv"
+    csv_path = output_dir / csv_filename
 
-    rows = []
+    # GPT-4o-mini로 CSV 생성 시도
+    try:
+        from openai import OpenAI
+        from app.config import settings
 
-    # Create character names based on num_characters
-    char_names = ["주인공", "친구"] if num_characters == 2 else ["주인공"]
+        if not settings.OPENAI_API_KEY:
+            logger.warning("OpenAI API key not set, using rule-based generation")
+            raise ValueError("No OpenAI API key")
 
-    # Generate simple scenes
-    for i in range(num_cuts):
-        scene_id = f"scene_{i+1}"
-        char_id = f"char_{(i % num_characters) + 1}"
-        char_name = char_names[i % num_characters]
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-        # Simple dialogue based on prompt
-        if mode == "story":
-            text = f"{prompt}의 {i+1}번째 장면입니다."
-            subtitle = f"장면 {i+1}"
-        else:  # ad
-            text = f"{prompt}를 소개하는 {i+1}번째 내용입니다."
-            subtitle = f"특징 {i+1}"
+        # 시스템 프롬프트 작성
+        system_prompt = f"""당신은 숏폼 영상 콘텐츠 시나리오 작가입니다.
+사용자의 요청을 {num_cuts}개 장면으로 나누어 {'스토리' if mode == 'story' else '광고 콘텐츠'}를 만들어주세요.
+등장인물은 {num_characters}명입니다.
 
-        emotion = "neutral" if i % 2 == 0 else "happy"
+각 장면마다 다음을 포함해야 합니다:
+- scene_id: scene_1, scene_2, ... 형식
+- sequence: 1, 2, 3, ... (장면 순서)
+- char_id: char_1, char_2 (등장인물 ID)
+- char_name: 캐릭터 이름 (창의적으로)
+- text: 캐릭터의 대사 (자연스럽고 생동감 있게)
+- emotion: neutral, happy, sad, excited, angry, surprised 중 하나
+- subtitle_text: 화면에 표시될 자막 (간결하게)
+- subtitle_position: top 또는 bottom
+- duration_ms: 장면 지속시간 (보통 4000-6000)
 
-        rows.append({
-            "scene_id": scene_id,
-            "sequence": i + 1,
-            "char_id": char_id,
-            "char_name": char_name,
-            "text": text,
-            "emotion": emotion,
-            "subtitle_text": subtitle,
-            "subtitle_position": "bottom" if i % 2 == 0 else "top",
-            "duration_ms": 5000  # 5 seconds per scene
-        })
+**중요**: 반드시 CSV 형식으로만 출력하세요. 헤더와 데이터만 포함하고 다른 설명은 넣지 마세요.
 
-    # Write CSV
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        fieldnames = [
-            "scene_id", "sequence", "char_id", "char_name", "text",
-            "emotion", "subtitle_text", "subtitle_position", "duration_ms"
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+CSV 형식:
+scene_id,sequence,char_id,char_name,text,emotion,subtitle_text,subtitle_position,duration_ms"""
 
-    logger.info(f"CSV generated: {csv_path} ({len(rows)} rows)")
-    return csv_path
+        logger.info(f"Calling GPT-4o-mini for plot generation...")
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=1500
+        )
+
+        csv_content = response.choices[0].message.content.strip()
+
+        # CSV 내용에서 마크다운 코드 블록 제거 (있을 경우)
+        if csv_content.startswith("```"):
+            lines = csv_content.split("\n")
+            csv_content = "\n".join([line for line in lines if not line.startswith("```")])
+
+        # CSV 파일로 저장
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write(csv_content.strip())
+
+        logger.info(f"✅ CSV generated with GPT-4o-mini: {csv_path}")
+
+        # CSV 검증 (행 개수 확인)
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            logger.info(f"Generated {len(rows)} scenes")
+
+        return csv_path
+
+    except Exception as e:
+        logger.warning(f"GPT-4o-mini failed: {e}, falling back to rule-based generation")
+
+        # 폴백: 룰 기반 생성
+        rows = []
+        char_names = ["주인공", "친구"] if num_characters == 2 else ["주인공"]
+
+        for i in range(num_cuts):
+            scene_id = f"scene_{i+1}"
+            char_id = f"char_{(i % num_characters) + 1}"
+            char_name = char_names[i % num_characters]
+
+            if mode == "story":
+                text = f"{prompt}의 {i+1}번째 장면입니다."
+                subtitle = f"장면 {i+1}"
+            else:
+                text = f"{prompt}를 소개하는 {i+1}번째 내용입니다."
+                subtitle = f"특징 {i+1}"
+
+            emotion = "neutral" if i % 2 == 0 else "happy"
+
+            rows.append({
+                "scene_id": scene_id,
+                "sequence": i + 1,
+                "char_id": char_id,
+                "char_name": char_name,
+                "text": text,
+                "emotion": emotion,
+                "subtitle_text": subtitle,
+                "subtitle_position": "bottom" if i % 2 == 0 else "top",
+                "duration_ms": 5000
+            })
+
+        # CSV 작성
+        with open(csv_path, "w", encoding="utf-8", newline="") as f:
+            fieldnames = [
+                "scene_id", "sequence", "char_id", "char_name", "text",
+                "emotion", "subtitle_text", "subtitle_position", "duration_ms"
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        logger.info(f"CSV generated (rule-based fallback): {csv_path} ({len(rows)} rows)")
+        return csv_path
 
 
 def csv_to_json(
@@ -260,8 +322,8 @@ def csv_to_json(
         }
     )
 
-    # Write JSON
-    json_path = Path(csv_path).parent / f"{run_id}_layout.json"
+    # Write JSON (same folder as CSV)
+    json_path = Path(csv_path).parent / "layout.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(shorts_json.model_dump(), f, indent=2, ensure_ascii=False)
 

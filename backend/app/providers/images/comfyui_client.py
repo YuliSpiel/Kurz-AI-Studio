@@ -61,6 +61,10 @@ class ComfyUIClient:
         Returns:
             Workflow dict
         """
+        # Fix path if it starts with backend/
+        if template_path.startswith("backend/"):
+            template_path = template_path[len("backend/"):]
+
         with open(template_path, "r") as f:
             return json.load(f)
 
