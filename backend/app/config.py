@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Provider switches
     IMAGE_PROVIDER: Literal["comfyui"] = "comfyui"
     TTS_PROVIDER: Literal["elevenlabs", "playht"] = "elevenlabs"
-    MUSIC_PROVIDER: Literal["mubert", "udio", "suno"] = "mubert"
+    MUSIC_PROVIDER: Literal["elevenlabs", "mubert", "udio", "suno"] = "elevenlabs"
 
     # Model/Prompt settings
     ART_STYLE_LORA: str = "WatercolorDream_v2"
@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ELEVENLABS_API_KEY: str = ""
     PLAYHT_API_KEY: str = ""
-    MUBERT_API_KEY: str = ""
+    PLAYHT_USER_ID: str = ""
+    MUBERT_LICENSE: str = ""
     UDIO_API_KEY: str = ""
 
     # S3/R2 Storage (optional)
