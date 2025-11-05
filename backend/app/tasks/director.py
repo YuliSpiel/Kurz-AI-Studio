@@ -101,18 +101,23 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
             logger.info(f"[{run_id}] Stub rendering complete: {output_path}")
             logger.info(f"[{run_id}] ===== END STUB RENDERING =====")
-            publish_progress(run_id, progress=0.95, log=f"렌더링 완료: {output_path}")
+            publish_progress(run_id, progress=0.8, log=f"렌더링 완료: {output_path}")
 
-            # Update FSM to END
-            if fsm and fsm.transition_to(RunState.END):
-                logger.info(f"[{run_id}] Transitioned to END")
-                publish_progress(run_id, state="END", progress=1.0, log="영상 생성 완료!")
+            # Transition to QA
+            if fsm and fsm.transition_to(RunState.QA):
+                logger.info(f"[{run_id}] Transitioned to QA")
+                publish_progress(run_id, state="QA", progress=0.82, log="QA 검수 단계로 전환...")
 
                 from app.main import runs
                 if run_id in runs:
                     runs[run_id]["state"] = fsm.current_state.value
-                    runs[run_id]["progress"] = 1.0
+                    runs[run_id]["progress"] = 0.82
                     runs[run_id]["artifacts"]["video_url"] = str(output_path)
+
+                # Trigger QA task
+                from app.tasks.qa import qa_task
+                qa_task.apply_async(args=[run_id, str(json_path), str(output_path)])
+                logger.info(f"[{run_id}] QA task triggered")
 
             return {
                 "run_id": run_id,
@@ -239,16 +244,23 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         )
 
         logger.info(f"[{run_id}] Video exported: {output_path}")
+        publish_progress(run_id, progress=0.8, log=f"영상 내보내기 완료: {output_path}")
 
-        # Update FSM to END
-        if fsm and fsm.transition_to(RunState.END):
-            logger.info(f"[{run_id}] Transitioned to END")
+        # Transition to QA
+        if fsm and fsm.transition_to(RunState.QA):
+            logger.info(f"[{run_id}] Transitioned to QA")
+            publish_progress(run_id, state="QA", progress=0.82, log="QA 검수 단계로 전환...")
 
             from app.main import runs
             if run_id in runs:
                 runs[run_id]["state"] = fsm.current_state.value
-                runs[run_id]["progress"] = 1.0
+                runs[run_id]["progress"] = 0.82
                 runs[run_id]["artifacts"]["video_url"] = str(output_path)
+
+            # Trigger QA task
+            from app.tasks.qa import qa_task
+            qa_task.apply_async(args=[run_id, str(json_path), str(output_path)])
+            logger.info(f"[{run_id}] QA task triggered")
 
         return {
             "run_id": run_id,
