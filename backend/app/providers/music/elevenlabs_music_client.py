@@ -3,7 +3,7 @@ ElevenLabs Sound Effects API for music generation.
 ElevenLabs provides sound effects and music generation capabilities.
 """
 import logging
-import requests
+import httpx
 from pathlib import Path
 from typing import Optional
 
@@ -68,20 +68,21 @@ class ElevenLabsMusicClient(MusicProvider):
                 "prompt_influence": 0.3  # 프롬프트 영향력 (0-1)
             }
 
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
-            response.raise_for_status()
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
 
-            # 오디오 파일 저장
-            output_path = Path(output_filename)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+                # 오디오 파일 저장
+                output_path = Path(output_filename)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(output_path, "wb") as f:
-                f.write(response.content)
+                with open(output_path, "wb") as f:
+                    f.write(response.content)
 
-            logger.info(f"ElevenLabs Music: Generated successfully -> {output_path}")
-            return output_path
+                logger.info(f"ElevenLabs Music: Generated successfully -> {output_path}")
+                return output_path
 
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"ElevenLabs Music API error: {e}")
 
             # Fallback: 더미 파일 생성
