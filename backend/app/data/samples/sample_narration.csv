@@ -1,6 +1,0 @@
-scene_id,char_id,expression,pose,text,text_type,emotion,subtitle_position,duration_ms
-scene_1,char_1,none,none,옛날 옛적 아주 먼 곳에 작은 마을이 있었습니다,narration,neutral,bottom,4500
-scene_2,char_2,confident,standing,저는 용감한 모험가입니다!,dialogue,excited,top,4000
-scene_3,char_1,none,none,주인공은 위험한 여정을 시작했습니다,narration,neutral,bottom,5000
-scene_4,char_2,brave,fist_raised,두려움은 없어요,dialogue,happy,top,3500
-scene_5,char_1,none,none,그리고 드디어 보물을 발견했습니다,narration,excited,bottom,5000

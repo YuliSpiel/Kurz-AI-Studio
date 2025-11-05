@@ -1,4 +1,0 @@
-scene_id,char_id,expression,pose,text,text_type,emotion,subtitle_position,duration_ms
-scene_1,char_1,excited,standing,우주선에 탑승했습니다,dialogue,happy,bottom,5000
-scene_2,char_1,amazed,looking_up,별들이 정말 아름답네요!,dialogue,happy,top,5000
-scene_3,char_1,determined,pointing,이제 새로운 행성으로 향합니다,dialogue,excited,bottom,5000
