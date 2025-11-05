@@ -15,6 +15,7 @@ celery = Celery(
         "app.tasks.composer",
         "app.tasks.voice",
         "app.tasks.director",
+        "app.tasks.qa",
         "app.tasks.recover",
     ]
 )
