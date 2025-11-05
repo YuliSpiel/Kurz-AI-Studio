@@ -152,6 +152,32 @@ csv_path = generate_csv_from_prompt(
 )
 print(f'CSV 생성: {csv_path}')
 "
+
+# 음악 생성 테스트 (ElevenLabs)
+python -c "
+import sys
+sys.path.insert(0, 'backend')
+from app.config import settings
+from app.providers.music.elevenlabs_music_client import ElevenLabsMusicClient
+
+if settings.ELEVENLABS_API_KEY:
+    client = ElevenLabsMusicClient(api_key=settings.ELEVENLABS_API_KEY)
+
+    # 프롬프트 확인
+    prompt = client._build_music_prompt('ambient', 'calm', 15.0)
+    print(f'ElevenLabs 프롬프트: {prompt}')
+
+    # 음악 생성
+    audio_path = client.generate_music(
+        genre='ambient',
+        mood='calm',
+        duration_ms=15000,
+        output_filename='app/data/test_bgm.mp3'
+    )
+    print(f'음악 생성: {audio_path}')
+else:
+    print('ELEVENLABS_API_KEY가 설정되지 않음 (Stub 모드)')
+"
 ```
 
 ---
