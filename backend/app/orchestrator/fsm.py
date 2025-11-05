@@ -1,6 +1,8 @@
 """
 Finite State Machine (FSM) for AutoShorts orchestration.
-Manages state transitions: INIT → PLOT_PLANNING → ASSET_GENERATION → RECOVER → RENDERING → END
+Manages state transitions: INIT → PLOT_GENERATION → ASSET_GENERATION → RENDERING → QA → END
+                                                                                      ↓ Fail
+                                                                                 PLOT_GENERATION (재시도)
 """
 import logging
 from enum import Enum
@@ -12,10 +14,10 @@ logger = logging.getLogger(__name__)
 class RunState(Enum):
     """State definitions for shorts generation workflow."""
     INIT = "INIT"
-    PLOT_PLANNING = "PLOT_PLANNING"
-    ASSET_GENERATION = "ASSET_GENERATION"
-    RECOVER = "RECOVER"
-    RENDERING = "RENDERING"
+    PLOT_GENERATION = "PLOT_GENERATION"  # Director: 플롯 생성
+    ASSET_GENERATION = "ASSET_GENERATION"  # Voice/Painter/Composer
+    RENDERING = "RENDERING"  # Director: 영상 합성
+    QA = "QA"  # QA Agent: 품질 검수
     END = "END"
     FAILED = "FAILED"
 
@@ -25,25 +27,20 @@ class FSM:
     Finite State Machine for orchestrating shorts generation workflow.
 
     State transitions:
-    INIT → PLOT_PLANNING → ASSET_GENERATION → RENDERING → END
-                ↓               ↓
-              FAILED         RECOVER → (retry)
+    INIT → PLOT_GENERATION → ASSET_GENERATION → RENDERING → QA → END
+              ↑                                                  ↓
+              └──────────────────── Fail (재시도) ───────────────┘
     """
 
     # Valid state transitions
     TRANSITIONS: Dict[RunState, list[RunState]] = {
-        RunState.INIT: [RunState.PLOT_PLANNING, RunState.FAILED],
-        RunState.PLOT_PLANNING: [RunState.ASSET_GENERATION, RunState.RECOVER, RunState.FAILED],
-        RunState.ASSET_GENERATION: [RunState.RENDERING, RunState.RECOVER, RunState.FAILED],
-        RunState.RECOVER: [
-            RunState.PLOT_PLANNING,
-            RunState.ASSET_GENERATION,
-            RunState.RENDERING,
-            RunState.FAILED
-        ],
-        RunState.RENDERING: [RunState.END, RunState.RECOVER, RunState.FAILED],
+        RunState.INIT: [RunState.PLOT_GENERATION, RunState.FAILED],
+        RunState.PLOT_GENERATION: [RunState.ASSET_GENERATION, RunState.FAILED],
+        RunState.ASSET_GENERATION: [RunState.RENDERING, RunState.FAILED],
+        RunState.RENDERING: [RunState.QA, RunState.FAILED],
+        RunState.QA: [RunState.END, RunState.PLOT_GENERATION, RunState.FAILED],  # Pass → END, Fail → 재시도
         RunState.END: [],
-        RunState.FAILED: [RunState.RECOVER],
+        RunState.FAILED: [],
     }
 
     def __init__(self, run_id: str, initial_state: RunState = RunState.INIT):
@@ -135,26 +132,21 @@ class FSM:
         self.transition_to(RunState.FAILED, metadata={"error": error_message})
         logger.error(f"Run {self.run_id} failed: {error_message}")
 
-    def can_recover(self) -> bool:
-        """Check if run can enter recovery state."""
-        return self.can_transition_to(RunState.RECOVER)
-
-    def get_retry_state(self) -> Optional[RunState]:
+    def retry_from_qa(self) -> bool:
         """
-        Determine which state to retry after recovery.
+        QA 실패 시 PLOT_GENERATION으로 재시도.
 
         Returns:
-            State to retry, or None if cannot recover
+            True if transition succeeded, False otherwise
         """
-        if len(self.history) < 2:
-            return None
+        if self.current_state != RunState.QA:
+            logger.warning(f"Cannot retry: current state is {self.current_state.value}, not QA")
+            return False
 
-        # Get the state before FAILED or RECOVER
-        for state in reversed(self.history[:-1]):
-            if state not in [RunState.FAILED, RunState.RECOVER]:
-                return state
-
-        return None
+        return self.transition_to(
+            RunState.PLOT_GENERATION,
+            metadata={"retry_reason": "QA failed, regenerating plot"}
+        )
 
     def is_terminal(self) -> bool:
         """Check if current state is terminal (END or FAILED)."""
