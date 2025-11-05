@@ -37,18 +37,22 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
-        # Get music provider
-        if settings.MUSIC_PROVIDER == "mubert":
+        # Get music provider (ElevenLabs 우선, Mubert는 폴백)
+        if settings.ELEVENLABS_API_KEY:
+            # ElevenLabs Sound Effects로 BGM 생성 (저렴하고 TTS와 통합)
+            from app.providers.music.elevenlabs_music_client import ElevenLabsMusicClient
+            client = ElevenLabsMusicClient(api_key=settings.ELEVENLABS_API_KEY)
+            logger.info(f"[{run_id}] Using ElevenLabs for music generation")
+        elif settings.MUBERT_LICENSE:
+            # Mubert 폴백
             from app.providers.music.mubert_client import MubertClient
-            client = MubertClient(api_key=settings.MUBERT_API_KEY)
-        elif settings.MUSIC_PROVIDER == "udio":
-            from app.providers.music.udio_stub import UdioClient
-            client = UdioClient(api_key=settings.UDIO_API_KEY)
-        elif settings.MUSIC_PROVIDER == "suno":
-            from app.providers.music.suno_stub import SunoClient
-            client = SunoClient()
+            client = MubertClient(api_key=settings.MUBERT_LICENSE)
+            logger.info(f"[{run_id}] Using Mubert for music generation")
         else:
-            raise ValueError(f"Unsupported music provider: {settings.MUSIC_PROVIDER}")
+            # Stub 모드 (API 키 없음)
+            from app.providers.music.stub_client import StubMusicClient
+            client = StubMusicClient()
+            logger.warning(f"[{run_id}] Using Stub mode for music (no API keys)")
 
         audio_results = []
 

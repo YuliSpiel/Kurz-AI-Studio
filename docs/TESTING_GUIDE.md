@@ -25,13 +25,13 @@ REDIS_URL=redis://localhost:6379         # Redis (Celery 브로커, FSM 저장�
 CELERY_BROKER_URL=redis://localhost:6379
 CELERY_RESULT_BACKEND=redis://localhost:6379
 
+# 권장 (음성+음악 통합)
+ELEVENLABS_API_KEY=your_api_key          # ElevenLabs (음성+음악 생성)
+
 # 선택 (없으면 Stub 모드로 동작)
 COMFYUI_URL=http://localhost:8188        # ComfyUI (이미지 생성)
-MUBERT_LICENSE=your_license_key          # Mubert (음악 생성)
-ELEVENLABS_API_KEY=your_api_key          # ElevenLabs (음성 생성)
-
-# 또는
-PLAYHT_USER_ID=your_user_id              # PlayHT (ElevenLabs 대체)
+MUBERT_LICENSE=your_license_key          # Mubert (음악 폴백, deprecated)
+PLAYHT_USER_ID=your_user_id              # PlayHT (음성 대체)
 PLAYHT_API_KEY=your_api_key
 ```
 
@@ -52,10 +52,12 @@ PLAYHT_API_KEY=your_api_key
 2. License 키 발급
 3. 요금: 무료 플랜 제공, 유료는 월 $14~
 
-#### ElevenLabs (선택)
+#### ElevenLabs (권장)
 1. https://elevenlabs.io 에서 계정 생성
 2. Profile → API Key에서 키 발급
 3. 요금: 무료 10,000 문자/월, 유료는 월 $5~
+4. **음성(TTS) + 음악(Sound Effects) 통합 제공**
+5. Mubert보다 저렴하고 음성과 통합 관리 가능
 
 #### PlayHT (선택, ElevenLabs 대체)
 1. https://play.ht 에서 계정 생성
@@ -111,9 +113,9 @@ jupyter notebook test_modules.ipynb
    - Seed 기반 일관성 확인
 
 4. **음악 생성** (셀 8-9)
-   - Mubert 파라미터 확인
-   - 배경음악 생성
-   - 오디오 재생
+   - ElevenLabs Sound Effects API 프롬프트 확인 (우선)
+   - Mubert 파라미터 확인 (폴백)
+   - 배경음악 생성 및 오디오 재생
 
 5. **음성 생성** (셀 10-11)
    - TTS 프롬프트 확인
@@ -210,8 +212,8 @@ npm start
 
 **Stub 모드 동작**:
 - ComfyUI 없음 → 더미 이미지 생성 (단색 PNG)
-- Mubert 없음 → 무음 MP3 생성
-- ElevenLabs/PlayHT 없음 → 무음 MP3 생성
+- 음악: ElevenLabs → Mubert → Stub (무음 MP3)
+- 음성: ElevenLabs → PlayHT → Stub (무음 MP3)
 
 **장점**: API 비용 없이 전체 워크플로 테스트 가능
 
@@ -360,7 +362,7 @@ celery -A app.celery_app inspect registered
 |------|----------|-----------|
 | 플롯 생성 (GPT-4o-mini) | 3-5초 | $0.001 |
 | 이미지 생성 (ComfyUI) | 10-30초/장 | 무료 (로컬) |
-| 음악 생성 (Mubert) | 5-10초 | $0 (무료 플랜) |
+| 음악 생성 (ElevenLabs) | 5-10초 | $0 (무료 플랜) |
 | 음성 생성 (ElevenLabs) | 2-5초/대사 | $0 (무료 플랜) |
 | 영상 합성 (MoviePy) | 10-20초 | 무료 |
 | **전체** | **2-3분** | **< $0.01** |
