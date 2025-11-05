@@ -61,20 +61,22 @@ def generate_csv_from_prompt(
 등장인물은 {num_characters}명입니다.
 
 각 장면마다 다음을 포함해야 합니다:
-- scene_id: scene_1, scene_2, ... 형식
-- sequence: 1, 2, 3, ... (장면 순서)
+- scene_id: scene_1, scene_2, ... 형식 (이 필드로 장면 순서가 결정됨)
 - char_id: char_1, char_2 (등장인물 ID)
 - char_name: 캐릭터 이름 (창의적으로)
-- text: 캐릭터의 대사 (자연스럽고 생동감 있게)
+- text: 대사 또는 해설 내용 (큰따옴표 없이 텍스트만 입력)
+- text_type: dialogue (대사) 또는 narration (해설)
 - emotion: neutral, happy, sad, excited, angry, surprised 중 하나
-- subtitle_text: 화면에 표시될 자막 (간결하게)
 - subtitle_position: top 또는 bottom
 - duration_ms: 장면 지속시간 (보통 4000-6000)
 
-**중요**: 반드시 CSV 형식으로만 출력하세요. 헤더와 데이터만 포함하고 다른 설명은 넣지 마세요.
+**중요**:
+- 반드시 CSV 형식으로만 출력하세요. 헤더와 데이터만 포함하고 다른 설명은 넣지 마세요.
+- text 필드에는 큰따옴표를 넣지 마세요 (렌더링 시 자동 추가됨)
+- text_type이 dialogue면 캐릭터 대사, narration이면 해설/나레이션입니다
 
 CSV 형식:
-scene_id,sequence,char_id,char_name,text,emotion,subtitle_text,subtitle_position,duration_ms"""
+scene_id,char_id,char_name,text,text_type,emotion,subtitle_position,duration_ms"""
 
         logger.info(f"Calling GPT-4o-mini for plot generation...")
 
@@ -123,21 +125,20 @@ scene_id,sequence,char_id,char_name,text,emotion,subtitle_text,subtitle_position
 
             if mode == "story":
                 text = f"{prompt}의 {i+1}번째 장면입니다."
-                subtitle = f"장면 {i+1}"
+                text_type = "dialogue"
             else:
                 text = f"{prompt}를 소개하는 {i+1}번째 내용입니다."
-                subtitle = f"특징 {i+1}"
+                text_type = "dialogue"
 
             emotion = "neutral" if i % 2 == 0 else "happy"
 
             rows.append({
                 "scene_id": scene_id,
-                "sequence": i + 1,
                 "char_id": char_id,
                 "char_name": char_name,
                 "text": text,
+                "text_type": text_type,
                 "emotion": emotion,
-                "subtitle_text": subtitle,
                 "subtitle_position": "bottom" if i % 2 == 0 else "top",
                 "duration_ms": 5000
             })
@@ -145,8 +146,8 @@ scene_id,sequence,char_id,char_name,text,emotion,subtitle_text,subtitle_position
         # CSV 작성
         with open(csv_path, "w", encoding="utf-8", newline="") as f:
             fieldnames = [
-                "scene_id", "sequence", "char_id", "char_name", "text",
-                "emotion", "subtitle_text", "subtitle_position", "duration_ms"
+                "scene_id", "char_id", "char_name", "text", "text_type",
+                "emotion", "subtitle_position", "duration_ms"
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -224,7 +225,8 @@ def csv_to_json(
 
     for scene_id, scene_rows in sorted(scenes_data.items(), key=lambda x: int(x[0].split("_")[1])):
         first_row = scene_rows[0]
-        sequence = int(first_row["sequence"])
+        # Extract sequence from scene_id (e.g., "scene_1" -> 1)
+        sequence = int(scene_id.split("_")[1])
         duration_ms = int(first_row["duration_ms"])
         total_duration += duration_ms
 
@@ -244,13 +246,20 @@ def csv_to_json(
                 ).model_dump()
             )
 
-        # Create subtitles
+        # Create subtitles (using text and text_type)
         subtitles = []
-        if first_row.get("subtitle_text"):
+        if first_row.get("text"):
+            # Format subtitle based on text_type
+            text = first_row["text"]
+            text_type = first_row.get("text_type", "dialogue")
+
+            # Add quotes for dialogue
+            subtitle_text = f'"{text}"' if text_type == "dialogue" else text
+
             subtitles.append(
                 Subtitle(
                     position=first_row.get("subtitle_position", "bottom"),
-                    text=first_row["subtitle_text"],
+                    text=subtitle_text,
                     start_ms=0,
                     duration_ms=duration_ms
                 ).model_dump()
