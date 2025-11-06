@@ -98,7 +98,19 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 for audio_result in result["audio"]:
                     if audio_result["type"] == "bgm":
                         bgm_path = audio_result["path"]
-                        if layout.get("global_bgm"):
+                        # Create global_bgm if it doesn't exist
+                        if not layout.get("global_bgm"):
+                            layout["global_bgm"] = {
+                                "bgm_id": audio_result.get("id", "global_bgm"),
+                                "genre": "ambient",
+                                "mood": "cinematic",
+                                "audio_url": bgm_path,
+                                "start_ms": 0,
+                                "duration_ms": layout.get("timeline", {}).get("total_duration_ms", 30000),
+                                "volume": 0.5
+                            }
+                            logger.info(f"[{run_id}] Created global BGM entry: {bgm_path}")
+                        else:
                             layout["global_bgm"]["audio_url"] = bgm_path
                             logger.info(f"[{run_id}] Updated global BGM: {bgm_path}")
 
@@ -307,7 +319,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             bgm_path = global_bgm["audio_url"]
             if Path(bgm_path).exists() and Path(bgm_path).stat().st_size > 100:
                 try:
-                    bgm_clip = AudioFileClip(bgm_path).with_volume_scaled(global_bgm.get("volume", 0.3))
+                    bgm_clip = AudioFileClip(bgm_path).with_volume_scaled(global_bgm.get("volume", 0.5))
                     audio_clips.append(bgm_clip)
                     logger.info(f"[{run_id}] Added BGM: {bgm_path}")
                 except Exception as e:
