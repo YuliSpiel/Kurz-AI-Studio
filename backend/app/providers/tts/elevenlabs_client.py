@@ -51,17 +51,17 @@ class ElevenLabsClient(TTSProvider):
         logger.info(f"Generating speech with ElevenLabs: {text[:50]}...")
 
         try:
-            # If voice_id is "default", use a standard voice
-            if voice_id == "default":
-                voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel (default voice)
+            # If voice_id is "default", use yuna (Korean voice)
+            if voice_id == "default" or voice_id == "yuna":
+                voice_id = "xi3rF0t7dg7uN2M0WUhr"  # yuna (Korean voice)
 
             # API endpoint
             url = f"{self.BASE_URL}/text-to-speech/{voice_id}"
 
-            # Request payload
+            # Request payload - use multilingual model for Korean support
             payload = {
                 "text": text,
-                "model_id": "eleven_monolingual_v1",
+                "model_id": "eleven_multilingual_v2",
                 "voice_settings": {
                     "stability": 0.5,
                     "similarity_boost": 0.75
@@ -78,9 +78,17 @@ class ElevenLabsClient(TTSProvider):
             response.raise_for_status()
 
             # Save audio
-            output_dir = Path("app/data/outputs")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / output_filename
+            # If output_filename is an absolute path or contains directories, use it directly
+            output_path = Path(output_filename)
+
+            # If it's just a filename (no directory), put it in default output directory
+            if not output_path.parent or output_path.parent == Path('.'):
+                output_dir = Path("app/data/outputs")
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / output_filename
+            else:
+                # Create parent directories if they don't exist
+                output_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(output_path, "wb") as f:
                 f.write(response.content)

@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(chmod:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pkill:*)",
+      "Bash(git checkout:*)",
+      "Bash(source kvenv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(convert:*)",
+      "Bash(kvenv/bin/python:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

@@ -4,6 +4,12 @@ Loads environment variables and provides provider switching logic.
 """
 from pydantic_settings import BaseSettings
 from typing import Literal
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from project root
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 
 class Settings(BaseSettings):
@@ -27,9 +33,9 @@ class Settings(BaseSettings):
     COMFY_WORKFLOW: str = "backend/app/providers/images/workflows/flux_omni_lora.json"
 
     # Provider switches
-    IMAGE_PROVIDER: Literal["comfyui"] = "comfyui"
+    IMAGE_PROVIDER: Literal["comfyui", "gemini"] = "gemini"
     TTS_PROVIDER: Literal["elevenlabs", "playht"] = "elevenlabs"
-    MUSIC_PROVIDER: Literal["mubert", "udio", "suno"] = "mubert"
+    MUSIC_PROVIDER: Literal["elevenlabs", "mubert", "udio", "suno"] = "elevenlabs"
 
     # Model/Prompt settings
     ART_STYLE_LORA: str = "WatercolorDream_v2"
@@ -37,10 +43,15 @@ class Settings(BaseSettings):
     BG_SEED_BASE: int = 2000
 
     # External API keys
+    OPENAI_API_KEY: str = ""
     ELEVENLABS_API_KEY: str = ""
     PLAYHT_API_KEY: str = ""
-    MUBERT_API_KEY: str = ""
+    PLAYHT_USER_ID: str = ""
+    MUBERT_LICENSE: str = ""
     UDIO_API_KEY: str = ""
+
+    # Gemini (Image Generation - Nano Banana)
+    GEMINI_API_KEY: str = ""
 
     # S3/R2 Storage (optional)
     S3_ENDPOINT: str = ""
@@ -49,7 +60,8 @@ class Settings(BaseSettings):
     S3_BUCKET: str = ""
 
     class Config:
-        env_file = ".env"
+        # Look for .env in current dir, parent dir, or grandparent dir
+        env_file = str(Path(__file__).resolve().parent.parent.parent / ".env")
         case_sensitive = True
 
 

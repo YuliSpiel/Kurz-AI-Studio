@@ -13,7 +13,7 @@ AutoShorts는 FSM 기반 오케스트레이션을 사용하여 생성 파이프�
     │
     ↓
 ┌─────────────────┐
-│ PLOT_PLANNING   │ ← 기획자: CSV → JSON 생성
+│ PLOT_GENERATION │ ← 기획자: CSV → JSON 생성
 └───┬─────────────┘
     │
     ↓
@@ -27,34 +27,38 @@ AutoShorts는 FSM 기반 오케스트레이션을 사용하여 생성 파이프�
 └───┬─────────────┘
     │
     ↓
-┌─────────┐
-│   END   │ ← 완료
-└─────────┘
+┌─────────────────┐
+│       QA        │ ← QA: 품질 검수
+└───┬─────────────┘
+    │
+    ├─ Pass → END
+    │
+    └─ Fail → PLOT_GENERATION (재시도)
 
 에러 발생 시:
     ↓
-┌─────────┐      ┌─────────┐
-│ FAILED  │ ←──→ │ RECOVER │
-└─────────┘      └─────────┘
+┌─────────┐
+│ FAILED  │
+└─────────┘
 ```
 
 ### 상태 전이 규칙
 
 | 현재 상태 | 가능한 다음 상태 |
 |---------|---------------|
-| INIT | PLOT_PLANNING, FAILED |
-| PLOT_PLANNING | ASSET_GENERATION, RECOVER, FAILED |
-| ASSET_GENERATION | RENDERING, RECOVER, FAILED |
-| RENDERING | END, RECOVER, FAILED |
-| FAILED | RECOVER |
-| RECOVER | (이전 상태로 재시도) |
+| INIT | PLOT_GENERATION, FAILED |
+| PLOT_GENERATION | ASSET_GENERATION, FAILED |
+| ASSET_GENERATION | RENDERING, FAILED |
+| RENDERING | QA, FAILED |
+| QA | END, PLOT_GENERATION (재시도), FAILED |
 | END | (종료 상태) |
+| FAILED | (종료 상태) |
 
 ---
 
 ## 오케스트레이션 플로우
 
-### 1. INIT → PLOT_PLANNING
+### 1. INIT → PLOT_GENERATION
 
 **담당**: 기획자 Agent (`tasks/plan.py`)
 
@@ -73,7 +77,7 @@ AutoShorts는 FSM 기반 오케스트레이션을 사용하여 생성 파이프�
 
 ---
 
-### 2. PLOT_PLANNING → ASSET_GENERATION
+### 2. PLOT_GENERATION → ASSET_GENERATION
 
 **팬아웃/배리어 패턴**: Celery `chord`를 사용하여 3개 에이전트를 병렬 실행
 
@@ -366,3 +370,51 @@ task.apply_async(args=[...], priority=9)
 - [Celery Documentation](https://docs.celeryproject.org/)
 - [MoviePy Documentation](https://zulko.github.io/moviepy/)
 - [ComfyUI API](https://github.com/comfyanonymous/ComfyUI)
+
+### 4. RENDERING → QA
+
+**담당**: QA Agent (`tasks/qa.py`)
+
+**작업**:
+1. 영상 파일 존재 확인
+2. JSON 레이아웃 유효성 검증
+   - 필수 필드 존재 (scenes, timeline)
+   - 모든 씬에 이미지 존재
+3. 에셋 파일 확인
+   - 이미지: `scenes[].images[].image_url` 경로 존재
+   - BGM: `global_bgm.audio_url` 경로 존재
+   - 음성: `scenes[].dialogue[].audio_url` 경로 존재
+4. 품질 판정
+   - Pass: 모든 검사 통과
+   - Fail: 하나 이상 실패
+
+**전이 조건**:
+- Pass → `END`
+- Fail → `PLOT_GENERATION` (재시도)
+- 에러 → `FAILED`
+
+**검수 항목**:
+```python
+qa_results = {
+    "checks": [
+        {"name": "Video file exists", "passed": True},
+        {"name": "JSON has 'scenes' field", "passed": True},
+        {"name": "JSON has 'timeline' field", "passed": True},
+        {"name": "Image for scene_1", "passed": True},
+        {"name": "Background music exists", "passed": True}
+    ],
+    "passed": True,
+    "issues": []
+}
+```
+
+**재시도 로직**:
+- QA 실패 시 `retry_from_qa()` 메서드 호출
+- FSM이 PLOT_GENERATION으로 전이
+- 플롯부터 재생성 시작
+- 재시도 횟수는 metadata에 기록
+
+---
+
+### 5. QA → END
+

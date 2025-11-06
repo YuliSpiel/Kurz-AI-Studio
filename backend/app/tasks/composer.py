@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.celery_app import celery
 from app.config import settings
+from app.utils.progress import publish_progress
 
 logger = logging.getLogger(__name__)
 
@@ -25,24 +26,33 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
         Dict with generated audio paths
     """
     logger.info(f"[{run_id}] Composer: Starting music generation...")
+    publish_progress(run_id, progress=0.45, log="작곡가: 배경음악 생성 시작...")
+
+    # TEST: 3초 대기
+    import time
+    time.sleep(3)
 
     try:
         # Load JSON
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
-        # Get music provider
-        if settings.MUSIC_PROVIDER == "mubert":
+        # Get music provider (ElevenLabs 우선, Mubert는 폴백)
+        if settings.ELEVENLABS_API_KEY:
+            # ElevenLabs Sound Effects로 BGM 생성 (저렴하고 TTS와 통합)
+            from app.providers.music.elevenlabs_music_client import ElevenLabsMusicClient
+            client = ElevenLabsMusicClient(api_key=settings.ELEVENLABS_API_KEY)
+            logger.info(f"[{run_id}] Using ElevenLabs for music generation")
+        elif settings.MUBERT_LICENSE:
+            # Mubert 폴백
             from app.providers.music.mubert_client import MubertClient
-            client = MubertClient(api_key=settings.MUBERT_API_KEY)
-        elif settings.MUSIC_PROVIDER == "udio":
-            from app.providers.music.udio_stub import UdioClient
-            client = UdioClient(api_key=settings.UDIO_API_KEY)
-        elif settings.MUSIC_PROVIDER == "suno":
-            from app.providers.music.suno_stub import SunoClient
-            client = SunoClient()
+            client = MubertClient(api_key=settings.MUBERT_LICENSE)
+            logger.info(f"[{run_id}] Using Mubert for music generation")
         else:
-            raise ValueError(f"Unsupported music provider: {settings.MUSIC_PROVIDER}")
+            # Stub 모드 (API 키 없음)
+            from app.providers.music.stub_client import StubMusicClient
+            client = StubMusicClient()
+            logger.warning(f"[{run_id}] Using Stub mode for music (no API keys)")
 
         audio_results = []
 
@@ -52,11 +62,15 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
 
         logger.info(f"[{run_id}] Generating global BGM: {music_genre}, {total_duration_ms}ms")
 
+        # Generate music in run_id folder
+        audio_dir = Path(f"app/data/outputs/{run_id}/audio")
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
         bgm_path = client.generate_music(
             genre=music_genre,
             mood="cinematic",
             duration_ms=total_duration_ms,
-            output_filename=f"{run_id}_global_bgm.mp3"
+            output_filename=str(audio_dir / "global_bgm.mp3")
         )
 
         # Update JSON
@@ -72,6 +86,8 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
             }
         else:
             layout["global_bgm"]["audio_url"] = str(bgm_path)
+
+        publish_progress(run_id, progress=0.5, log=f"작곡가: 배경음악 생성 완료 - {bgm_path}")
 
         audio_results.append({
             "type": "bgm",

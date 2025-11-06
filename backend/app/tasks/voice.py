@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.celery_app import celery
 from app.config import settings
+from app.utils.progress import publish_progress
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
         Dict with generated voice paths
     """
     logger.info(f"[{run_id}] Voice: Starting TTS generation...")
+    publish_progress(run_id, progress=0.55, log="성우: 음성 합성 시작...")
+
+    # TEST: 3초 대기
+    import time
+    time.sleep(3)
 
     try:
         # Load JSON
@@ -32,14 +38,17 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
             layout = json.load(f)
 
         # Get TTS provider
-        if settings.TTS_PROVIDER == "elevenlabs":
+        if settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
             from app.providers.tts.elevenlabs_client import ElevenLabsClient
             client = ElevenLabsClient(api_key=settings.ELEVENLABS_API_KEY)
-        elif settings.TTS_PROVIDER == "playht":
+        elif settings.TTS_PROVIDER == "playht" and settings.PLAYHT_API_KEY:
             from app.providers.tts.playht_client import PlayHTClient
             client = PlayHTClient(api_key=settings.PLAYHT_API_KEY)
         else:
-            raise ValueError(f"Unsupported TTS provider: {settings.TTS_PROVIDER}")
+            # Fallback to stub when no API key is available
+            logger.warning(f"No API key for {settings.TTS_PROVIDER}, using stub TTS")
+            from app.providers.tts.stub_client import StubTTSClient
+            client = StubTTSClient()
 
         voice_results = []
 
@@ -50,33 +59,39 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
             voice_profile = spec.get("voice_id") or char.get("voice_profile", "default")
             char_voices[char_id] = voice_profile
 
-        # Generate TTS for each dialogue line
+        # Generate TTS for each text line
         for scene in layout.get("scenes", []):
             scene_id = scene["scene_id"]
 
-            for dialogue in scene.get("dialogue", []):
-                line_id = dialogue["line_id"]
-                char_id = dialogue["char_id"]
-                text = dialogue["text"]
-                emotion = dialogue.get("emotion", "neutral")
+            for text_line in scene.get("texts", []):
+                line_id = text_line["line_id"]
+                char_id = text_line["char_id"]
+                text = text_line["text"]
+                emotion = text_line.get("emotion", "neutral")
+
+                # Remove quotes for TTS generation (quotes are only for display)
+                tts_text = text.strip('"')
 
                 voice_profile = char_voices.get(char_id, "default")
 
                 logger.info(
                     f"[{run_id}] Generating TTS for {scene_id}/{line_id}: "
-                    f"{text[:30]}... (voice={voice_profile}, emotion={emotion})"
+                    f"{tts_text[:30]}... (voice={voice_profile}, emotion={emotion})"
                 )
 
-                # Generate TTS
+                # Generate TTS in run_id folder
+                audio_dir = Path(f"app/data/outputs/{run_id}/audio")
+                audio_dir.mkdir(parents=True, exist_ok=True)
+
                 audio_path = client.generate_speech(
-                    text=text,
+                    text=tts_text,
                     voice_id=voice_profile,
                     emotion=emotion,
-                    output_filename=f"{run_id}_{scene_id}_{line_id}.mp3"
+                    output_filename=str(audio_dir / f"{scene_id}_{line_id}.mp3")
                 )
 
                 # Update JSON
-                dialogue["audio_url"] = str(audio_path)
+                text_line["audio_url"] = str(audio_path)
 
                 voice_results.append({
                     "scene_id": scene_id,
@@ -91,6 +106,7 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
             json.dump(layout, f, indent=2, ensure_ascii=False)
 
         logger.info(f"[{run_id}] Voice: Completed {len(voice_results)} lines")
+        publish_progress(run_id, progress=0.65, log=f"성우: 모든 음성 합성 완료 ({len(voice_results)}개)")
 
         # Update progress
         from app.main import runs

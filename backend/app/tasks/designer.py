@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.celery_app import celery
 from app.config import settings
+from app.utils.progress import publish_progress
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +26,67 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
         Dict with generated image paths
     """
     logger.info(f"[{run_id}] Designer: Starting image generation...")
+    publish_progress(run_id, progress=0.3, log="디자이너: 이미지 생성 시작...")
+
+    # TEST: 3초 대기
+    import time
+    time.sleep(3)
 
     try:
-        # Load JSON
+        # Load layout JSON
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
+        # Load plot.json for expression/pose info
+        plot_json_path = Path(json_path).parent / "plot.json"
+        plot_data = {}
+        if plot_json_path.exists():
+            with open(plot_json_path, "r", encoding="utf-8") as f:
+                plot_data = json.load(f)
+            logger.info(f"[{run_id}] Loaded plot.json for expression/pose data")
+
+        # Load characters.json for appearance info
+        characters_json_path = Path(json_path).parent / "characters.json"
+        characters_data = {}
+        if characters_json_path.exists():
+            with open(characters_json_path, "r", encoding="utf-8") as f:
+                characters_data = json.load(f)
+            logger.info(f"[{run_id}] Loaded characters.json for appearance data")
+
         # Get image provider
-        if settings.IMAGE_PROVIDER == "comfyui":
-            from app.providers.images.comfyui_client import ComfyUIClient
-            client = ComfyUIClient(base_url=settings.COMFY_URL)
-        else:
-            raise ValueError(f"Unsupported image provider: {settings.IMAGE_PROVIDER}")
+        client = None
+        provider = settings.IMAGE_PROVIDER
+
+        if provider == "gemini":
+            # Gemini (Nano Banana) provider
+            if settings.GEMINI_API_KEY:
+                try:
+                    from app.providers.images.gemini_image_client import GeminiImageClient
+                    client = GeminiImageClient(api_key=settings.GEMINI_API_KEY)
+                    logger.info(f"[{run_id}] Using Gemini (Nano Banana) image provider")
+                except Exception as e:
+                    logger.warning(f"Gemini not available: {e}, using stub images")
+                    client = None
+            else:
+                logger.warning("GEMINI_API_KEY not set, using stub")
+
+        elif provider == "comfyui":
+            # ComfyUI provider
+            try:
+                from app.providers.images.comfyui_client import ComfyUIClient
+                client = ComfyUIClient(base_url=settings.COMFY_URL)
+                # Test connection
+                import httpx
+                response = httpx.get(f"{settings.COMFY_URL}/system_stats", timeout=2.0)
+                response.raise_for_status()
+                logger.info(f"[{run_id}] Using ComfyUI image provider")
+            except Exception as e:
+                logger.warning(f"ComfyUI not available: {e}, using stub images")
+                client = None
+
+        if not client:
+            logger.warning("Using stub image generation (no provider available)")
+            # Use stub - create placeholder images
 
         image_results = []
 
@@ -59,7 +109,36 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                         None
                     )
                     if char:
-                        prompt = f"{char['name']}, {char['persona']}, {spec.get('art_style', '')}"
+                        art_style = spec.get('art_style', '파스텔 수채화')
+
+                        # Get appearance from characters.json
+                        appearance = char['persona']  # fallback
+                        if characters_data:
+                            char_data = next(
+                                (c for c in characters_data.get("characters", []) if c["char_id"] == char_id),
+                                None
+                            )
+                            if char_data:
+                                appearance = char_data.get("appearance", char['persona'])
+
+                        # Get expression/pose from plot.json for this scene
+                        expression = "neutral"
+                        pose = "standing"
+                        if plot_data:
+                            scene_data = next(
+                                (s for s in plot_data.get("scenes", []) if s["scene_id"] == scene_id),
+                                None
+                            )
+                            if scene_data and scene_data.get("char_id") == char_id:
+                                expression = scene_data.get("expression", "neutral")
+                                pose = scene_data.get("pose", "standing")
+
+                        # Build prompt: art_style + appearance + expression + pose
+                        if expression != "none" and pose != "none":
+                            prompt = f"{art_style}, {appearance}, {expression} expression, {pose} pose"
+                        else:
+                            prompt = f"{art_style}, {appearance}"
+
                         seed = char.get("seed", settings.BASE_CHAR_SEED)
                     else:
                         prompt = f"character, {spec.get('art_style', '')}"
@@ -74,14 +153,38 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                 # Generate image
                 logger.info(f"[{run_id}] Generating {scene_id}/{slot_id}: {prompt[:50]}...")
 
-                image_path = client.generate_image(
-                    prompt=prompt,
-                    seed=seed,
-                    lora_name=settings.ART_STYLE_LORA,
-                    lora_strength=spec.get("lora_strength", 0.8),
-                    reference_images=spec.get("reference_images", []),
-                    output_prefix=f"{run_id}_{scene_id}_{slot_id}"
-                )
+                if client:
+                    # Generate image based on provider type
+                    if provider == "gemini":
+                        image_path = client.generate_image(
+                            prompt=prompt,
+                            seed=seed,
+                            width=512,
+                            height=768,  # 9:16 ratio
+                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                        )
+                    elif provider == "comfyui":
+                        image_path = client.generate_image(
+                            prompt=prompt,
+                            seed=seed,
+                            lora_name=settings.ART_STYLE_LORA,
+                            lora_strength=spec.get("lora_strength", 0.8),
+                            reference_images=spec.get("reference_images", []),
+                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                        )
+                else:
+                    # Create stub image (1x1 pixel PNG)
+                    import base64
+                    stub_png = base64.b64decode(
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                    )
+                    stub_dir = Path(f"app/data/outputs/{run_id}/images")
+                    stub_dir.mkdir(parents=True, exist_ok=True)
+                    image_path = stub_dir / f"{scene_id}_{slot_id}.png"
+                    with open(image_path, "wb") as f:
+                        f.write(stub_png)
+                    logger.info(f"Created stub image: {image_path}")
+                    publish_progress(run_id, log=f"디자이너: 이미지 생성 완료 - {scene_id}_{slot_id}")
 
                 # Update JSON with image path
                 img_slot["image_url"] = str(image_path)
@@ -98,6 +201,7 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
             json.dump(layout, f, indent=2, ensure_ascii=False)
 
         logger.info(f"[{run_id}] Designer: Completed {len(image_results)} images")
+        publish_progress(run_id, progress=0.4, log=f"디자이너: 모든 이미지 생성 완료 ({len(image_results)}개)")
 
         # Update progress
         from app.main import runs

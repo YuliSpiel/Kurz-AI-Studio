@@ -31,9 +31,8 @@ def recover_task(self, run_id: str, failed_state: str, error_message: str):
     logger.info(f"[{run_id}] Error: {error_message}")
 
     try:
-        # Get FSM
-        from app.orchestrator.fsm import _fsm_registry
-        fsm = _fsm_registry.get(run_id)
+        # Get FSM (from Redis if needed)
+        fsm = get_fsm(run_id)
         if not fsm:
             raise ValueError(f"FSM not found for run {run_id}")
 
@@ -72,7 +71,7 @@ def recover_task(self, run_id: str, failed_state: str, error_message: str):
         fsm.metadata["retry_count"] = retry_count + 1
 
         # Re-trigger the failed task
-        if retry_state == RunState.PLOT_PLANNING:
+        if retry_state == RunState.PLOT_GENERATION:
             from app.tasks.plan import plan_task
             from app.main import runs
             spec = runs.get(run_id, {}).get("spec", {})

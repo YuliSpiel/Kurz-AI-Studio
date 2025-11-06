@@ -48,11 +48,9 @@ class MubertClient(MusicProvider):
             f"duration={duration_ms}ms"
         )
 
-        # Create placeholder
-        output_dir = Path("app/data/outputs")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / output_filename
-
+        # output_filename에 전체 경로가 이미 포함되어 있음
+        output_path = Path(output_filename)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.touch()
 
         logger.info(f"Mubert stub: created placeholder at {output_path}")

@@ -35,7 +35,27 @@ export default function RunStatus({ runId, onCompleted }: RunStatusProps) {
         // Refresh status
         getRun(runId).then(setStatus)
       } else if (data.type === 'progress') {
-        getRun(runId).then(setStatus)
+        // 진행도 업데이트 시 로그 메시지도 추가
+        if (data.message) {
+          setLogs((prev) => [...prev, data.message])
+        }
+        // 상태 업데이트 (진행도, state, artifacts 등)
+        setStatus((prev: any) => ({
+          ...prev,
+          progress: data.progress ?? prev?.progress,
+          state: data.state ?? prev?.state,
+          artifacts: data.artifacts ?? prev?.artifacts,
+        }))
+
+        // END 상태일 때 완료 콜백 호출
+        if (data.state === 'END') {
+          onCompleted({
+            ...status,
+            state: data.state,
+            progress: data.progress,
+            artifacts: data.artifacts,
+          })
+        }
       }
     }
 

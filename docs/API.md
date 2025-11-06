@@ -67,8 +67,8 @@ http://localhost:8080/api
 
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
-  "state": "PLOT_PLANNING",
+  "run_id": "20251105_1430_우주여행고양이",
+  "state": "PLOT_GENERATION",
   "progress": 0.0,
   "artifacts": {},
   "logs": ["Run created, starting plot planning..."]
@@ -96,7 +96,7 @@ Run의 현재 상태와 진행률을 조회합니다.
 
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "run_id": "20251105_1430_우주여행고양이",
   "state": "RENDERING",
   "progress": 0.7,
   "artifacts": {
@@ -136,12 +136,12 @@ Run의 현재 상태와 진행률을 조회합니다.
 **State Values:**
 
 - `INIT`: 초기화
-- `PLOT_PLANNING`: 플롯 기획 중
+- `PLOT_GENERATION`: 플롯 생성 중
 - `ASSET_GENERATION`: 에셋 생성 중 (병렬)
 - `RENDERING`: 영상 합성 중
+- `QA`: 품질 검수 중
 - `END`: 완료
 - `FAILED`: 실패
-- `RECOVER`: 복구 시도 중
 
 **Status Codes:**
 
@@ -251,7 +251,7 @@ Run의 실시간 진행 상황을 수신합니다.
 ### Usage Example (JavaScript)
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/550e8400-e29b-41d4-a716-446655440000');
+const ws = new WebSocket('ws://localhost:8080/ws/20251105_1430_우주여행고양이');
 
 ws.onopen = () => {
   console.log('Connected');
@@ -301,10 +301,10 @@ ws.onclose = () => {
 
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "run_id": "20251105_1430_우주여행고양이",
   "previous_state": "ASSET_GENERATION",
   "current_state": "RENDERING",
-  "history": ["INIT", "PLOT_PLANNING", "ASSET_GENERATION", "RENDERING"]
+  "history": ["INIT", "PLOT_GENERATION", "ASSET_GENERATION", "RENDERING"]
 }
 ```
 
@@ -318,9 +318,9 @@ FSM 상태 조회.
 
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "run_id": "20251105_1430_우주여행고양이",
   "current_state": "RENDERING",
-  "history": ["INIT", "PLOT_PLANNING", "ASSET_GENERATION", "RENDERING"],
+  "history": ["INIT", "PLOT_GENERATION", "ASSET_GENERATION", "RENDERING"],
   "is_terminal": false,
   "can_recover": true,
   "metadata": {}
@@ -341,7 +341,7 @@ Run을 실패 상태로 변경 (테스트용).
 
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "run_id": "20251105_1430_우주여행고양이",
   "current_state": "FAILED",
   "error": "Manual failure"
 }
