@@ -242,23 +242,44 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
             # Layer images
             image_clips = [base_clip]
-            for img_slot in scene.get("images", []):
+
+            # Sort slots by z_index (background first, then characters)
+            sorted_slots = sorted(scene.get("images", []), key=lambda s: s.get("z_index", 1))
+
+            for img_slot in sorted_slots:
                 img_url = img_slot.get("image_url")
                 if img_url and Path(img_url).exists():
-                    # Load and position image (MoviePy 2.x uses duration parameter)
+                    # Load image (MoviePy 2.x uses duration parameter)
                     img_clip = ImageClip(img_url, duration=duration_sec)
 
-                    # Resize to fit
-                    img_clip = img_clip.resized(height=height * 0.6)
+                    img_type = img_slot.get("type", "character")
 
-                    # Position based on slot
-                    slot_id = img_slot.get("slot_id", "center")
-                    if slot_id == "left":
-                        img_clip = img_clip.with_position(("left", "center"))
-                    elif slot_id == "right":
-                        img_clip = img_clip.with_position(("right", "center"))
-                    else:
+                    # Handle different image types
+                    if img_type == "background":
+                        # Background: fill entire screen
+                        img_clip = img_clip.resized((width, height))
                         img_clip = img_clip.with_position(("center", "center"))
+                        logger.info(f"[{run_id}] Added background image")
+                    else:
+                        # Character: resize and position based on x_pos
+                        img_clip = img_clip.resized(height=height * 0.6)
+
+                        # Check for x_pos (Story Mode positioning)
+                        if "x_pos" in img_slot:
+                            x_pos = img_slot["x_pos"]  # 0.25 (left), 0.5 (center), 0.75 (right)
+                            x_pixel = int(x_pos * width)
+                            y_pixel = int(height * 0.5)  # Vertically centered
+                            img_clip = img_clip.with_position((x_pixel, y_pixel), relative=False)
+                            logger.info(f"[{run_id}] Positioned character at x={x_pos:.2f} ({x_pixel}px)")
+                        else:
+                            # Legacy positioning by slot_id
+                            slot_id = img_slot.get("slot_id", "center")
+                            if slot_id == "left":
+                                img_clip = img_clip.with_position(("left", "center"))
+                            elif slot_id == "right":
+                                img_clip = img_clip.with_position(("right", "center"))
+                            else:
+                                img_clip = img_clip.with_position(("center", "center"))
 
                     image_clips.append(img_clip)
 
