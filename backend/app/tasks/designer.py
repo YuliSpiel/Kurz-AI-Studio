@@ -153,26 +153,33 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                 # Generate image
                 logger.info(f"[{run_id}] Generating {scene_id}/{slot_id}: {prompt[:50]}...")
 
+                image_path = None
                 if client:
-                    # Generate image based on provider type
-                    if provider == "gemini":
-                        image_path = client.generate_image(
-                            prompt=prompt,
-                            seed=seed,
-                            width=512,
-                            height=768,  # 9:16 ratio
-                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                        )
-                    elif provider == "comfyui":
-                        image_path = client.generate_image(
-                            prompt=prompt,
-                            seed=seed,
-                            lora_name=settings.ART_STYLE_LORA,
-                            lora_strength=spec.get("lora_strength", 0.8),
-                            reference_images=spec.get("reference_images", []),
-                            output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                        )
-                else:
+                    try:
+                        # Generate image based on provider type
+                        if provider == "gemini":
+                            image_path = client.generate_image(
+                                prompt=prompt,
+                                seed=seed,
+                                width=512,
+                                height=768,  # 9:16 ratio
+                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                            )
+                        elif provider == "comfyui":
+                            image_path = client.generate_image(
+                                prompt=prompt,
+                                seed=seed,
+                                lora_name=settings.ART_STYLE_LORA,
+                                lora_strength=spec.get("lora_strength", 0.8),
+                                reference_images=spec.get("reference_images", []),
+                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                            )
+                    except Exception as e:
+                        logger.error(f"[{run_id}] Image generation failed for {scene_id}/{slot_id}: {e}")
+                        logger.warning(f"[{run_id}] Falling back to stub image")
+                        image_path = None
+
+                if not image_path:
                     # Create stub image (1x1 pixel PNG)
                     import base64
                     stub_png = base64.b64decode(
@@ -183,8 +190,8 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     image_path = stub_dir / f"{scene_id}_{slot_id}.png"
                     with open(image_path, "wb") as f:
                         f.write(stub_png)
-                    logger.info(f"Created stub image: {image_path}")
-                    publish_progress(run_id, log=f"디자이너: 이미지 생성 완료 - {scene_id}_{slot_id}")
+                    logger.info(f"[{run_id}] Created stub image: {image_path}")
+                    publish_progress(run_id, log=f"디자이너: stub 이미지 생성 - {scene_id}_{slot_id}")
 
                 # Update JSON with image path
                 img_slot["image_url"] = str(image_path)
