@@ -12,7 +12,8 @@
       "Bash(pip install:*)",
       "Bash(python3:*)",
       "Bash(convert:*)",
-      "Bash(kvenv/bin/python:*)"
+      "Bash(kvenv/bin/python:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []
