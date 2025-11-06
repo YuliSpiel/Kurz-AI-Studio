@@ -103,6 +103,10 @@ def convert_plot_to_json(
     scenes = []
     total_duration = 0
 
+    # Detect schema type from first row
+    first_scene_row = rows[0] if rows else {}
+    is_story_mode = "char1_id" in first_scene_row and "speaker" in first_scene_row
+
     for scene_id, scene_rows in sorted(scenes_data.items(), key=lambda x: int(x[0].split("_")[1])):
         first_row = scene_rows[0]
         sequence = int(scene_id.split("_")[1])
@@ -120,10 +124,18 @@ def convert_plot_to_json(
             # text_type이 dialogue일 경우에만 큰따옴표 추가
             display_text = f'"{text}"' if text_type == "dialogue" else text
 
+            # Determine char_id for voice selection
+            if is_story_mode:
+                speaker = row.get("speaker", "narration")
+                # Convert speaker format to char_id (char_1 -> char_1)
+                voice_char_id = speaker if speaker != "narration" else "narrator"
+            else:
+                voice_char_id = row["char_id"]
+
             texts.append(
                 TextLine(
                     line_id=line_id,
-                    char_id=row["char_id"],
+                    char_id=voice_char_id,
                     text=display_text,
                     text_type=text_type,
                     emotion=row.get("emotion", "neutral"),
@@ -135,38 +147,117 @@ def convert_plot_to_json(
             )
 
         # Create image slots
-        # Get character's appearance from characters_data if available
-        char_id = first_row["char_id"]
-        char_appearance = ""
-        if characters_data:
-            for char in characters_data:
-                if char["char_id"] == char_id:
-                    char_appearance = char.get("appearance", "")
-                    break
+        images = []
 
-        expression = first_row.get("expression", "neutral")
-        pose = first_row.get("pose", "standing")
+        if is_story_mode:
+            # Story Mode: Multiple characters with positioning
+            char1_id = first_row.get("char1_id")
+            char2_id = first_row.get("char2_id")
 
-        # Build image prompt
-        if char_appearance and expression != "none" and pose != "none":
-            image_prompt = f"{char_appearance}, {expression} expression, {pose} pose"
-        elif char_appearance:
-            image_prompt = char_appearance
-        else:
-            image_prompt = ""
+            # Position mapping for x-coordinate (for multi-character scenes)
+            position_map = {
+                "left": 0.25,
+                "center": 0.5,
+                "right": 0.75
+            }
 
-        images = [
-            ImageSlot(
-                slot_id="center",
-                type="character",
-                ref_id=char_id,
-                image_url="",  # Will be filled by designer
-                z_index=1
+            # Add char1 if present
+            if char1_id:
+                char1_appearance = ""
+                for char in characters_data:
+                    if char["char_id"] == char1_id:
+                        char1_appearance = char.get("appearance", "")
+                        break
+
+                char1_expr = first_row.get("char1_expression", "neutral")
+                char1_pose = first_row.get("char1_pose", "standing")
+                char1_pos = first_row.get("char1_pos", "center")
+
+                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose" if char1_appearance else ""
+
+                char1_slot = ImageSlot(
+                    slot_id=f"{char1_id}_slot",
+                    type="character",
+                    ref_id=char1_id,
+                    image_url="",
+                    z_index=2
+                ).model_dump()
+                char1_slot["image_prompt"] = char1_prompt
+                char1_slot["position"] = char1_pos
+                char1_slot["x_pos"] = position_map.get(char1_pos, 0.5)
+                images.append(char1_slot)
+
+            # Add char2 if present
+            if char2_id:
+                char2_appearance = ""
+                for char in characters_data:
+                    if char["char_id"] == char2_id:
+                        char2_appearance = char.get("appearance", "")
+                        break
+
+                char2_expr = first_row.get("char2_expression", "neutral")
+                char2_pose = first_row.get("char2_pose", "standing")
+                char2_pos = first_row.get("char2_pos", "right")
+
+                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose" if char2_appearance else ""
+
+                char2_slot = ImageSlot(
+                    slot_id=f"{char2_id}_slot",
+                    type="character",
+                    ref_id=char2_id,
+                    image_url="",
+                    z_index=2
+                ).model_dump()
+                char2_slot["image_prompt"] = char2_prompt
+                char2_slot["position"] = char2_pos
+                char2_slot["x_pos"] = position_map.get(char2_pos, 0.75)
+                images.append(char2_slot)
+
+            # Add background image slot
+            background_img = first_row.get("background_img", "simple background")
+            bg_slot = ImageSlot(
+                slot_id="background",
+                type="background",
+                ref_id=scene_id,
+                image_url="",
+                z_index=0
             ).model_dump()
-        ]
+            bg_slot["image_prompt"] = background_img
+            images.insert(0, bg_slot)  # Background goes first (z_index 0)
 
-        # Store image_prompt in metadata (for designer task)
-        images[0]["image_prompt"] = image_prompt
+        else:
+            # Legacy Mode: Single character centered
+            char_id = first_row["char_id"]
+            char_appearance = ""
+            if characters_data:
+                for char in characters_data:
+                    if char["char_id"] == char_id:
+                        char_appearance = char.get("appearance", "")
+                        break
+
+            expression = first_row.get("expression", "neutral")
+            pose = first_row.get("pose", "standing")
+
+            # Build image prompt
+            if char_appearance and expression != "none" and pose != "none":
+                image_prompt = f"{char_appearance}, {expression} expression, {pose} pose"
+            elif char_appearance:
+                image_prompt = char_appearance
+            else:
+                image_prompt = ""
+
+            images = [
+                ImageSlot(
+                    slot_id="center",
+                    type="character",
+                    ref_id=char_id,
+                    image_url="",  # Will be filled by designer
+                    z_index=1
+                ).model_dump()
+            ]
+
+            # Store image_prompt in metadata (for designer task)
+            images[0]["image_prompt"] = image_prompt
 
         # SFX
         sfx_list = []
