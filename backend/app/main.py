@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import orjson
 import redis.asyncio as aioredis  # Redis를 비동기적으로 사용하기 위한 라이브러리
 
@@ -75,7 +76,7 @@ async def redis_listener(): # Redis에서 진행도 메시지를 받아서 WebSo
                             if "log" in data:
                                 runs[run_id]["logs"].append(data["log"])
 
-                        # Broadcast to WebSocket clients
+                        # Broadcast to WebSocket clients (include artifacts)
                         await broadcast_to_websockets(
                             run_id,
                             {
@@ -84,6 +85,7 @@ async def redis_listener(): # Redis에서 진행도 메시지를 받아서 WebSo
                                 "state": data.get("state"),
                                 "progress": data.get("progress"),
                                 "message": data.get("log", ""),
+                                "artifacts": runs[run_id]["artifacts"] if run_id in runs else {},
                             },
                         )
 
@@ -141,6 +143,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for generated videos
+app.mount("/outputs", StaticFiles(directory="app/data/outputs"), name="outputs")
 
 
 @app.get("/")

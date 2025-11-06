@@ -110,7 +110,8 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
         # Check if we're in stub mode (no real assets)
         from app.config import settings
-        stub_mode = not settings.ELEVENLABS_API_KEY and not settings.PLAYHT_API_KEY
+        # Always use full rendering mode since MoviePy is installed
+        stub_mode = False
 
         if stub_mode:
             logger.info(f"[{run_id}] ===== STUB RENDERING MODE =====")
@@ -172,7 +173,8 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 if run_id in runs:
                     runs[run_id]["state"] = fsm.current_state.value
                     runs[run_id]["progress"] = 0.82
-                    runs[run_id]["artifacts"]["video_url"] = str(output_path)
+                    # Set HTTP URL path for frontend to access video
+                    runs[run_id]["artifacts"]["video_url"] = f"/outputs/{run_id}/final_video.mp4"
 
                 # Trigger QA task
                 from app.tasks.qa import qa_task
@@ -316,7 +318,8 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             if run_id in runs:
                 runs[run_id]["state"] = fsm.current_state.value
                 runs[run_id]["progress"] = 0.82
-                runs[run_id]["artifacts"]["video_url"] = str(output_path)
+                # Set HTTP URL path for frontend to access video
+                runs[run_id]["artifacts"]["video_url"] = f"/outputs/{run_id}/final_video.mp4"
 
             # Trigger QA task
             from app.tasks.qa import qa_task

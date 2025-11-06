@@ -160,7 +160,11 @@ def qa_task(self, run_id: str, json_path: str, video_path: str):
                 if run_id in runs:
                     runs[run_id]["state"] = fsm.current_state.value
                     runs[run_id]["progress"] = 1.0
+                    # Keep video_url from director, add qa_result
                     runs[run_id]["artifacts"]["qa_result"] = qa_results
+                    # Ensure video_url is set
+                    if "video_url" not in runs[run_id]["artifacts"]:
+                        runs[run_id]["artifacts"]["video_url"] = f"/outputs/{run_id}/final_video.mp4"
         else:
             logger.warning(f"[{run_id}] QA: ❌ Checks FAILED - Issues: {qa_results['issues']}")
             publish_progress(
