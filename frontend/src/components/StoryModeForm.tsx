@@ -27,6 +27,7 @@ export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
   ])
   const [referenceImage, setReferenceImage] = useState<File | null>(null)
   const [stylePreset, setStylePreset] = useState<string>('dreamy')
+  const [numCuts, setNumCuts] = useState<number>(5)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const addCharacter = () => {
@@ -87,10 +88,6 @@ export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
       if (referenceImage) {
         generalReferenceImage = await uploadReferenceImage(referenceImage)
       }
-
-      // Calculate num_cuts based on story length (GPT will use this as a guide)
-      const storyLength = storyText.length
-      const numCuts = storyLength < 200 ? 3 : storyLength < 500 ? 5 : 8
 
       const result = await createRun({
         mode: 'story',
@@ -270,6 +267,18 @@ export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
           <option value="vibrant">Vibrant (화사한)</option>
           <option value="noir">Noir (어두운)</option>
         </select>
+      </div>
+
+      <div className="form-group">
+        <label>장면 수 (1-10)</label>
+        <input
+          type="number"
+          min="1"
+          max="10"
+          value={numCuts}
+          onChange={(e) => setNumCuts(parseInt(e.target.value) || 5)}
+        />
+        <p className="help-text">생성할 장면의 개수를 선택하세요</p>
       </div>
 
       <button

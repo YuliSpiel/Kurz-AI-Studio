@@ -17,7 +17,7 @@ class Character(BaseModel):
 
 class ImageSlot(BaseModel):
     """Image slot positioning in scene."""
-    slot_id: Literal["left", "center", "right"]
+    slot_id: str = Field(description="Slot identifier (e.g., 'left', 'center', 'right', 'char_1_slot', 'background')")
     type: Literal["character", "background", "prop"]
     ref_id: Optional[str] = Field(None, description="char_id or asset ID")
     image_url: str = Field(description="생성된 이미지 경로")

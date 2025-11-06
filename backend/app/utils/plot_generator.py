@@ -133,13 +133,27 @@ JSON 형식:
         char_list = "\n".join([f"- {c['char_id']}: {c['name']} ({c.get('role', c['personality'])})"
                                for c in characters_data["characters"]])
 
+        # Add detailed character information when user provides characters
+        char_details = ""
+        if characters:
+            char_details = "\n\n캐릭터 세부정보 (반드시 이 설정 그대로 사용할 것):\n"
+            for c in characters_data["characters"]:
+                char_details += f"- {c['name']} ({c['char_id']})\n"
+                char_details += f"  외형: {c['appearance']}\n"
+                char_details += f"  성격: {c['personality']}\n"
+                if c.get('role'):
+                    char_details += f"  역할: {c['role']}\n"
+                char_details += "\n"
+
         # Use new schema for Story Mode
+        logger.info(f"[DEBUG] Preparing plot generation: mode='{mode}', characters={'provided' if characters else 'None'}, num_cuts={num_cuts}")
         if mode == "story":
+            logger.info("[DEBUG] ✅ Using STORY MODE prompt (char1_id/char2_id/speaker/background_img schema)")
             plot_prompt = f"""당신은 비주얼노벨 스타일 숏폼 영상 시나리오 작가입니다.
 사용자의 스토리를 {num_cuts}개 장면으로 나누어 시나리오를 만들어주세요.
 
 등장인물:
-{char_list}
+{char_list}{char_details}
 
 각 장면마다 다음 정보를 JSON 형식으로 제공하세요:
 - scene_id: scene_1, scene_2, ... 형식
@@ -164,6 +178,8 @@ JSON 형식:
 - 한 장면에 최대 2명의 캐릭터만 등장 가능
 - speaker가 narration이면 char1_id에 해설자를 배치하고 char2_id는 null
 - background_img는 간결한 영어 프롬프트로 작성 (5-10 단어)
+- 위에 제공된 캐릭터 세부정보가 있다면 반드시 그 이름, 성격, 역할을 그대로 사용할 것
+- 캐릭터의 대사와 행동은 그들의 성격에 맞게 작성할 것
 
 JSON 형식:
 {{
@@ -208,6 +224,7 @@ JSON 형식:
 }}"""
         else:
             # Legacy schema for normal/ad modes
+            logger.info(f"[DEBUG] ⚠️ Using LEGACY MODE prompt (char_id/expression/pose schema) for mode='{mode}'")
             plot_prompt = f"""당신은 숏폼 영상 콘텐츠 시나리오 작가입니다.
 사용자의 요청을 {num_cuts}개 장면으로 나누어 {'광고' if mode == 'ad' else '영상'}를 만들어주세요.
 
@@ -285,7 +302,7 @@ JSON 형식:
         return characters_path, plot_path
 
     except Exception as e:
-        logger.warning(f"GPT generation failed: {e}, using fallback")
+        logger.warning(f"GPT generation failed: {e}, using fallback with mode='{mode}'")
         return _generate_fallback(output_dir, prompt, num_characters, num_cuts, mode, characters)
 
 
@@ -300,6 +317,7 @@ def _generate_fallback(
     """
     Fallback: rule-based generation when GPT fails.
     """
+    logger.info(f"[DEBUG] Fallback generation: mode='{mode}', num_cuts={num_cuts}")
     characters_path = output_dir / "characters.json"
     plot_path = output_dir / "plot.json"
 
@@ -348,6 +366,7 @@ def _generate_fallback(
 
         if mode == "story":
             # Story Mode: Use new schema
+            logger.debug(f"[DEBUG] Fallback: generating story mode scene {i+1}")
             scenes.append({
                 "scene_id": scene_id,
                 "char1_id": char_id,

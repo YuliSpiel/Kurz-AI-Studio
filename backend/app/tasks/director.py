@@ -249,10 +249,43 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             for img_slot in sorted_slots:
                 img_url = img_slot.get("image_url")
                 if img_url and Path(img_url).exists():
-                    # Load image (MoviePy 2.x uses duration parameter)
-                    img_clip = ImageClip(img_url, duration=duration_sec)
-
                     img_type = img_slot.get("type", "character")
+
+                    # Load image with proper transparency handling for PNG
+                    from PIL import Image as PILImage
+
+                    pil_img = PILImage.open(img_url)
+
+                    # Check if image has alpha channel (transparency)
+                    has_alpha = pil_img.mode in ('RGBA', 'LA') or (pil_img.mode == 'P' and 'transparency' in pil_img.info)
+
+                    if has_alpha and img_type == "character":
+                        # Character with transparency - use mask for proper compositing
+                        logger.info(f"[{run_id}] Loading transparent PNG: {img_url}")
+
+                        # Convert to RGBA if needed
+                        if pil_img.mode != 'RGBA':
+                            pil_img = pil_img.convert('RGBA')
+
+                        # Split RGB and alpha
+                        img_array = np.array(pil_img)
+                        rgb = img_array[:, :, :3]
+                        alpha = img_array[:, :, 3]
+
+                        # Create ImageClip from RGB array
+                        img_clip = ImageClip(rgb, duration=duration_sec, is_mask=False)
+
+                        # Create mask from alpha channel
+                        # Normalize alpha to 0-1 range for MoviePy
+                        alpha_normalized = alpha.astype(float) / 255.0
+                        mask_clip = ImageClip(alpha_normalized, duration=duration_sec, is_mask=True)
+
+                        # Apply mask to image
+                        img_clip = img_clip.with_mask(mask_clip)
+                        logger.info(f"[{run_id}] Applied transparency mask to character image")
+                    else:
+                        # Background or image without alpha - load normally
+                        img_clip = ImageClip(img_url, duration=duration_sec)
 
                     # Handle different image types
                     if img_type == "background":

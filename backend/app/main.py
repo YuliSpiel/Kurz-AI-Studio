@@ -178,6 +178,11 @@ async def create_run(spec: RunSpec):
     prompt_clean = "".join(c for c in spec.prompt if not c.isspace())[:8]
     run_id = f"{timestamp}_{prompt_clean}"
 
+    logger.info(f"[DEBUG] Received run request:")
+    logger.info(f"[DEBUG]   mode='{spec.mode}'")
+    logger.info(f"[DEBUG]   num_cuts={spec.num_cuts}")
+    logger.info(f"[DEBUG]   num_characters={spec.num_characters}")
+    logger.info(f"[DEBUG]   characters={'YES (' + str(len(spec.characters)) + ' chars)' if spec.characters else 'NO'}")
     logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
 
     # Initialize FSM

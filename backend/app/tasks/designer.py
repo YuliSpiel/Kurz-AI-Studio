@@ -37,6 +37,10 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
+        # Check if this is story mode (for background removal)
+        is_story_mode = layout.get("mode") == "story"
+        logger.info(f"[{run_id}] Mode: {layout.get('mode')}, Background removal: {'enabled' if is_story_mode else 'disabled'}")
+
         # Load plot.json for expression/pose info
         plot_json_path = Path(json_path).parent / "plot.json"
         plot_data = {}
@@ -213,13 +217,16 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     logger.info(f"[{run_id}] Created stub image: {image_path}")
                     publish_progress(run_id, log=f"디자이너: stub 이미지 생성 - {scene_id}_{slot_id}")
                 else:
-                    # Apply background removal to character images (not background)
-                    if img_type == "character" and Path(image_path).exists():
+                    # Debug: Log conditions for background removal
+                    logger.info(f"[{run_id}] [DEBUG] Checking rembg conditions: is_story_mode={is_story_mode}, img_type={img_type}, path_exists={Path(image_path).exists()}, image_path={image_path}")
+
+                    # Apply background removal to character images (ONLY in Story Mode)
+                    if is_story_mode and img_type == "character" and Path(image_path).exists():
                         try:
                             from rembg import remove
                             from PIL import Image
 
-                            logger.info(f"[{run_id}] Removing background from character image: {image_path}")
+                            logger.info(f"[{run_id}] [Story Mode] Removing background from character image: {image_path}")
 
                             # Load image
                             input_image = Image.open(image_path)
