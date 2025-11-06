@@ -41,6 +41,45 @@ body {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
+/* Mode Selector */
+.mode-selector {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-bottom: 40px;
+  padding-bottom: 30px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.mode-btn {
+  padding: 12px 30px;
+  background: white;
+  color: #667eea;
+  border: 2px solid #667eea;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mode-btn:hover:not(:disabled) {
+  background: #f0f4ff;
+  transform: translateY(-2px);
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Run Form */
 .run-form {
   max-width: 600px;
@@ -48,8 +87,33 @@ body {
 }
 
 .run-form h2 {
-  margin-bottom: 30px;
+  margin-bottom: 10px;
   color: #667eea;
+}
+
+.mode-description {
+  margin-bottom: 30px;
+  color: #777;
+  font-size: 0.95rem;
+  font-style: italic;
+}
+
+/* Story Mode specific styles */
+.story-mode-form h2 {
+  color: #28a745;
+}
+
+.story-mode-form .btn-submit {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+/* Ad Mode specific styles */
+.ad-mode-form h2 {
+  color: #fd7e14;
+}
+
+.ad-mode-form .btn-submit {
+  background: linear-gradient(135deg, #fd7e14 0%, #e63946 100%);
 }
 
 .form-group {
