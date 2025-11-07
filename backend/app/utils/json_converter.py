@@ -228,7 +228,8 @@ def convert_plot_to_json(
                         break
 
                 # Character image (background will be removed by rembg)
-                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, full body, white background" if char1_appearance else ""
+                # Fixed framing: from thighs up for consistency
+                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, from thighs up, upper body portrait, pure white background, centered composition" if char1_appearance else ""
 
                 char1_slot = ImageSlot(
                     slot_id=f"{char1_id}_slot",
@@ -251,7 +252,8 @@ def convert_plot_to_json(
                         break
 
                 # Character image (background will be removed by rembg)
-                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, full body, white background" if char2_appearance else ""
+                # Fixed framing: from thighs up for consistency
+                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, from thighs up, upper body portrait, pure white background, centered composition" if char2_appearance else ""
 
                 char2_slot = ImageSlot(
                     slot_id=f"{char2_id}_slot",
@@ -289,11 +291,12 @@ def convert_plot_to_json(
             expression = first_row.get("expression", "neutral")
             pose = first_row.get("pose", "standing")
 
-            # Build image prompt (background will be removed by rembg)
+            # Build image prompt with consistent framing
+            # Fixed framing: from thighs up for consistency
             if char_appearance and expression != "none" and pose != "none":
-                image_prompt = f"{char_appearance}, {expression} expression, {pose} pose, full body, white background"
+                image_prompt = f"{char_appearance}, {expression} expression, {pose} pose, from thighs up, upper body portrait, pure white background, centered composition"
             elif char_appearance:
-                image_prompt = f"{char_appearance}, full body, white background"
+                image_prompt = f"{char_appearance}, from thighs up, upper body portrait, pure white background, centered composition"
             else:
                 image_prompt = ""
 

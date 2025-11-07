@@ -177,6 +177,14 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                 # Generate image
                 logger.info(f"[{run_id}] Generating {scene_id}/{slot_id}: {prompt[:50]}...")
 
+                # Set dimensions based on image type for consistency
+                if img_type == "character":
+                    # Character: 2:3 ratio (portrait, from thighs up)
+                    width, height = 512, 768
+                else:
+                    # Background: 9:16 ratio (full vertical screen)
+                    width, height = 1080, 1920
+
                 image_path = None
                 if client:
                     try:
@@ -185,8 +193,8 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                             image_path = client.generate_image(
                                 prompt=prompt,
                                 seed=seed,
-                                width=512,
-                                height=768,  # 9:16 ratio
+                                width=width,
+                                height=height,
                                 output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
                             )
                         elif provider == "comfyui":
