@@ -477,9 +477,13 @@ def _generate_fallback(
                 })
 
     if mode == "story":
-        plot_data = {"scenes": scenes}
+        plot_data = {
+            "title": prompt[:10] if len(prompt) <= 10 else prompt[:10] + "...",
+            "scenes": scenes
+        }
     else:
         plot_data = {
+            "title": prompt[:10] if len(prompt) <= 10 else prompt[:10] + "...",
             "bgm_prompt": "calm, atmospheric background music",
             "scenes": scenes
         }

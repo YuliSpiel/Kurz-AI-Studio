@@ -53,6 +53,14 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
+        # Get layout customization config
+        layout_config = layout.get("metadata", {}).get("layout_config", {})
+        title_bg_color = layout_config.get("title_bg_color", "#323296")  # Default dark blue
+        title_font_size = layout_config.get("title_font_size", 80)
+        subtitle_font_size = layout_config.get("subtitle_font_size", 60)
+        # Note: Font family customization would require additional font files
+        logger.info(f"[{run_id}] Layout config: {layout_config}")
+
         # IMPORTANT: Update layout.json with asset URLs from chord results
         # This fixes race condition where parallel tasks overwrite each other's changes
         logger.info(f"[{run_id}] Updating layout.json with asset URLs from chord results...")
@@ -372,7 +380,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     txt_clip = TextClip(
                         text=text_content,
                         font=KOREAN_FONT,
-                        font_size=60,
+                        font_size=subtitle_font_size,
                         color=text_color,
                         stroke_color=stroke_color,
                         stroke_width=2,
@@ -389,6 +397,46 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     logger.info(f"[{run_id}] Added subtitle at top: {text_content[:30]}...")
                 except Exception as e:
                     logger.warning(f"[{run_id}] Failed to create text overlay: {e}")
+
+            # Add title block at the top (1/8 of screen height)
+            title_text = layout.get("title", "")
+            if title_text:
+                try:
+                    title_height = height // 8  # 1/8 of screen height
+
+                    # Convert hex color to RGB
+                    def hex_to_rgb(hex_color):
+                        hex_color = hex_color.lstrip('#')
+                        return [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
+
+                    title_rgb = hex_to_rgb(title_bg_color)
+
+                    # Create background rectangle for title
+                    def make_title_bg(t):
+                        bg = np.full((title_height, width, 3), title_rgb, dtype=np.uint8)
+                        return bg
+
+                    title_bg_clip = VideoClip(make_title_bg, duration=duration_sec)
+                    title_bg_clip = title_bg_clip.with_position((0, 0))
+
+                    # Create title text (bold and large)
+                    title_clip = TextClip(
+                        text=title_text,
+                        font=KOREAN_FONT,
+                        font_size=title_font_size,
+                        color='white',
+                        stroke_color='black',
+                        stroke_width=3,
+                        duration=duration_sec
+                    )
+                    # Center title text within the title block
+                    title_clip = title_clip.with_position(('center', title_height // 3))
+
+                    # Add title block and text to the scene
+                    video_clip = CompositeVideoClip([video_clip, title_bg_clip, title_clip], size=(width, height))
+                    logger.info(f"[{run_id}] Added title block: {title_text} (color: {title_bg_color}, size: {title_font_size}px)")
+                except Exception as e:
+                    logger.warning(f"[{run_id}] Failed to create title block: {e}")
 
             # Combine video with text overlays
             if text_clips:

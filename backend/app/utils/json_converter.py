@@ -16,7 +16,9 @@ def convert_plot_to_json(
     plot_json_path: str,
     run_id: str,
     art_style: str = "파스텔 수채화",
-    music_genre: str = "ambient"
+    music_genre: str = "ambient",
+    video_title: str = None,
+    layout_config: dict = None
 ) -> Path:
     """
     Convert plot.json and characters.json to final layout.json.
@@ -26,6 +28,8 @@ def convert_plot_to_json(
         run_id: Run identifier
         art_style: Art style for image generation
         music_genre: Music genre for BGM
+        video_title: User-specified video title
+        layout_config: Layout customization settings (title_bg_color, fonts, etc.)
 
     Returns:
         Path to generated layout.json file
@@ -53,8 +57,10 @@ def convert_plot_to_json(
     if not rows:
         raise ValueError("Plot JSON has no scenes")
 
-    # Extract bgm_prompt if present (General/Ad Mode)
+    # Extract bgm_prompt and title if present
     bgm_prompt = plot_data.get("bgm_prompt")
+    # Use user-specified title, or GPT-generated title, or fallback
+    final_title = video_title or plot_data.get("title", "")
 
     # Build JSON structure
     from app.schemas.json_layout import (
@@ -371,13 +377,18 @@ def convert_plot_to_json(
         metadata_dict["bgm_prompt"] = bgm_prompt
         logger.info(f"Added bgm_prompt to metadata: {bgm_prompt}")
 
+    # Add layout_config if present
+    if layout_config:
+        metadata_dict["layout_config"] = layout_config
+        logger.info(f"Added layout_config to metadata: {layout_config}")
+
     # Determine mode from schema detection
     mode_value = "story" if is_story_mode else "general"
     logger.info(f"Layout mode: {mode_value}")
 
     shorts_json = ShortsJSON(
         project_id=run_id,
-        title=f"AutoShorts {run_id}",
+        title=final_title if final_title else f"AutoShorts {run_id}",
         mode=mode_value,
         timeline=timeline.model_dump(),
         characters=characters,
@@ -385,6 +396,9 @@ def convert_plot_to_json(
         global_bgm=None,
         metadata=metadata_dict
     )
+
+    if final_title:
+        logger.info(f"Using title: {final_title}")
 
     # Write layout JSON
     json_path = plot_json_path.parent / "layout.json"

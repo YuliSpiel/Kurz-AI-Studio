@@ -50,6 +50,11 @@ class RunSpec(BaseModel):
         description="음악 장르 (예: ambient, cinematic, upbeat)"
     )
 
+    video_title: Optional[str] = Field(
+        default=None,
+        description="사용자 지정 영상 제목"
+    )
+
     reference_images: Optional[List[str]] = Field(
         default=None,
         description="업로드된 참조 이미지 파일명 리스트"
@@ -72,6 +77,12 @@ class RunSpec(BaseModel):
     characters: Optional[List[CharacterInput]] = Field(
         default=None,
         description="캐릭터 정보 리스트 (Story Mode에서 사용)"
+    )
+
+    # Layout customization
+    layout_config: Optional[Dict] = Field(
+        default=None,
+        description="레이아웃 커스터마이징 설정 (title_bg_color, title_font, title_font_size, subtitle_font, subtitle_font_size)"
     )
 
 
