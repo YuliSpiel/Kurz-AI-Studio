@@ -157,31 +157,49 @@ JSON 형식:
 
 각 장면마다 다음 정보를 JSON 형식으로 제공하세요:
 - scene_id: scene_1, scene_2, ... 형식
-- char1_id: 첫 번째 캐릭터 ID (char_1, char_2, char_3 중 하나, 필수)
-- char1_pos: 위치 (left, center, right 중 하나)
-- char1_expression: 표정 (excited, happy, sad, angry, surprised, neutral, confident 등)
-- char1_pose: 포즈 (standing, sitting, walking, pointing 등)
-- char2_id: 두 번째 캐릭터 ID (선택, 없으면 null)
-- char2_pos: 위치 (left, center, right 중 하나, char2_id가 있을 때만)
-- char2_expression: 표정 (char2_id가 있을 때만)
-- char2_pose: 포즈 (char2_id가 있을 때만)
+- char1_id: 첫 번째 캐릭터 ID (char_1, char_2, char_3 중 하나, 또는 null)
+- char1_pos: 위치 (left, center, right 중 하나, 또는 "" = 이전 위치 유지)
+- char1_expression: 표정 (excited, happy, sad, angry, surprised, neutral, confident 등, 또는 "" = 이전 표정 유지)
+- char1_pose: 포즈 (standing, sitting, walking, pointing 등, 또는 "" = 이전 포즈 유지)
+- char2_id: 두 번째 캐릭터 ID (char_1, char_2, char_3 중 하나, 또는 null = 캐릭터 없음)
+- char2_pos: 위치 (left, center, right 중 하나, 또는 "" = 이전 위치 유지)
+- char2_expression: 표정 ("" = 이전 표정 유지)
+- char2_pose: 포즈 ("" = 이전 포즈 유지)
 - speaker: 발화자 (narration, char_1, char_2, char_3 중 하나)
 - text: 대사 또는 해설 내용
 - text_type: dialogue (대사) 또는 narration (해설)
 - emotion: neutral, happy, sad, excited, angry, surprised 중 하나
 - subtitle_position: top 또는 bottom
 - duration_ms: 장면 지속시간 (4000-6000)
-- background_img: 배경 이미지 생성 프롬프트 (예: "calm farm", "busy city street", "cozy bedroom")
+- background_img: 배경 이미지 생성 프롬프트 (예: "calm farm", "busy city street", 또는 "" = 이전 배경 유지)
 
-**중요**:
-- 반드시 JSON 형식으로만 출력
-- 한 장면에 최대 2명의 캐릭터만 등장 가능
-- speaker가 narration이면 char1_id에 해설자를 배치하고 char2_id는 null
-- background_img는 간결한 영어 프롬프트로 작성 (5-10 단어)
-- 위에 제공된 캐릭터 세부정보가 있다면 반드시 그 이름, 성격, 역할을 그대로 사용할 것
-- 캐릭터의 대사와 행동은 그들의 성격에 맞게 작성할 것
+**중요 규칙**:
+1. **캐릭터 배치**:
+   - 모든 장면에 모든 캐릭터를 넣지 마세요. 스토리 흐름에 따라 필요한 캐릭터만 배치
+   - 혼자 독백하거나 클로즈업이 필요하면 char1_id만 사용하고 char2_id는 null
+   - 두 캐릭터가 대화할 때만 char1_id와 char2_id 모두 사용
+   - 해설(narration)일 때는 캐릭터 없이 배경만 보여줄 수 있음 (char1_id, char2_id 모두 null)
 
-JSON 형식:
+2. **위치 충돌 방지**:
+   - 두 캐릭터가 동시에 등장하면 반드시 다른 위치에 배치 (예: char1_pos="left", char2_pos="right")
+   - 한 명만 등장하면 "center" 사용 가능
+   - 절대 같은 위치에 두 캐릭터를 배치하지 마세요 (겹침)
+
+3. **배경 재사용**:
+   - 배경은 분위기가 바뀔 때만 변경하세요
+   - 같은 장소에서 계속 대화하면 background_img를 ""로 두어 이전 배경 유지
+   - 장소 이동이나 시간 변화가 있을 때만 새로운 배경 프롬프트 작성
+
+4. **표정/포즈 캐싱**:
+   - 캐릭터의 표정이나 포즈가 이전 장면과 같으면 ""로 두어 재사용
+   - 변화가 있을 때만 새로운 값 입력
+
+5. **기타**:
+   - 반드시 JSON 형식으로만 출력
+   - background_img는 간결한 영어 프롬프트로 작성 (5-10 단어)
+   - 위에 제공된 캐릭터 세부정보가 있다면 반드시 그 이름, 성격, 역할을 그대로 사용할 것
+
+JSON 예시:
 {{
   "scenes": [
     {{
@@ -200,14 +218,14 @@ JSON 형식:
       "emotion": "happy",
       "subtitle_position": "top",
       "duration_ms": 5000,
-      "background_img": "sunny playground"
+      "background_img": "sunny playground with swings"
     }},
     {{
       "scene_id": "scene_2",
       "char1_id": "char_1",
       "char1_pos": "left",
       "char1_expression": "happy",
-      "char1_pose": "standing",
+      "char1_pose": "",
       "char2_id": "char_2",
       "char2_pos": "right",
       "char2_expression": "surprised",
@@ -218,7 +236,25 @@ JSON 형식:
       "emotion": "excited",
       "subtitle_position": "bottom",
       "duration_ms": 4500,
-      "background_img": "starry night sky"
+      "background_img": ""
+    }},
+    {{
+      "scene_id": "scene_3",
+      "char1_id": null,
+      "char1_pos": null,
+      "char1_expression": null,
+      "char1_pose": null,
+      "char2_id": null,
+      "char2_pos": null,
+      "char2_expression": null,
+      "char2_pose": null,
+      "speaker": "narration",
+      "text": "그들은 함께 우주선을 타고 떠났다.",
+      "text_type": "narration",
+      "emotion": "neutral",
+      "subtitle_position": "center",
+      "duration_ms": 5000,
+      "background_img": "starry night sky with rocket launching"
     }}
   ]
 }}"""

@@ -107,6 +107,19 @@ def convert_plot_to_json(
     first_scene_row = rows[0] if rows else {}
     is_story_mode = "char1_id" in first_scene_row and "speaker" in first_scene_row
 
+    # Cache for previous scene values (for Story Mode)
+    cache = {
+        "char1_id": None,
+        "char1_expression": "neutral",
+        "char1_pose": "standing",
+        "char1_pos": "center",
+        "char2_id": None,
+        "char2_expression": "neutral",
+        "char2_pose": "standing",
+        "char2_pos": "right",
+        "background_img": "simple background"
+    }
+
     for scene_id, scene_rows in sorted(scenes_data.items(), key=lambda x: int(x[0].split("_")[1])):
         first_row = scene_rows[0]
         sequence = int(scene_id.split("_")[1])
@@ -151,8 +164,53 @@ def convert_plot_to_json(
 
         if is_story_mode:
             # Story Mode: Multiple characters with positioning
-            char1_id = first_row.get("char1_id")
-            char2_id = first_row.get("char2_id")
+            # Get values from plot, use cache if empty string ""
+            char1_id_raw = first_row.get("char1_id")
+            char1_id = char1_id_raw if char1_id_raw else cache["char1_id"]
+
+            char1_expr_raw = first_row.get("char1_expression", "neutral")
+            char1_expr = char1_expr_raw if char1_expr_raw else cache["char1_expression"]
+
+            char1_pose_raw = first_row.get("char1_pose", "standing")
+            char1_pose = char1_pose_raw if char1_pose_raw else cache["char1_pose"]
+
+            char1_pos_raw = first_row.get("char1_pos", "center")
+            char1_pos = char1_pos_raw if char1_pos_raw else cache["char1_pos"]
+
+            char2_id_raw = first_row.get("char2_id")
+            char2_id = char2_id_raw if char2_id_raw else cache["char2_id"]
+
+            char2_expr_raw = first_row.get("char2_expression", "neutral")
+            char2_expr = char2_expr_raw if char2_expr_raw else cache["char2_expression"]
+
+            char2_pose_raw = first_row.get("char2_pose", "standing")
+            char2_pose = char2_pose_raw if char2_pose_raw else cache["char2_pose"]
+
+            char2_pos_raw = first_row.get("char2_pos", "right")
+            char2_pos = char2_pos_raw if char2_pos_raw else cache["char2_pos"]
+
+            background_img_raw = first_row.get("background_img", "simple background")
+            background_img = background_img_raw if background_img_raw else cache["background_img"]
+
+            # Update cache with new values (only if not empty)
+            if char1_id_raw is not None:
+                cache["char1_id"] = char1_id
+            if char1_expr_raw:
+                cache["char1_expression"] = char1_expr
+            if char1_pose_raw:
+                cache["char1_pose"] = char1_pose
+            if char1_pos_raw:
+                cache["char1_pos"] = char1_pos
+            if char2_id_raw is not None:
+                cache["char2_id"] = char2_id
+            if char2_expr_raw:
+                cache["char2_expression"] = char2_expr
+            if char2_pose_raw:
+                cache["char2_pose"] = char2_pose
+            if char2_pos_raw:
+                cache["char2_pos"] = char2_pos
+            if background_img_raw:
+                cache["background_img"] = background_img
 
             # Position mapping for x-coordinate (for multi-character scenes)
             position_map = {
@@ -161,17 +219,13 @@ def convert_plot_to_json(
                 "right": 0.75
             }
 
-            # Add char1 if present
+            # Add char1 if present (and not null)
             if char1_id:
                 char1_appearance = ""
                 for char in characters_data:
                     if char["char_id"] == char1_id:
                         char1_appearance = char.get("appearance", "")
                         break
-
-                char1_expr = first_row.get("char1_expression", "neutral")
-                char1_pose = first_row.get("char1_pose", "standing")
-                char1_pos = first_row.get("char1_pos", "center")
 
                 # Character image (background will be removed by rembg)
                 char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, full body, white background" if char1_appearance else ""
@@ -188,17 +242,13 @@ def convert_plot_to_json(
                 char1_slot["x_pos"] = position_map.get(char1_pos, 0.5)
                 images.append(char1_slot)
 
-            # Add char2 if present
+            # Add char2 if present (and not null)
             if char2_id:
                 char2_appearance = ""
                 for char in characters_data:
                     if char["char_id"] == char2_id:
                         char2_appearance = char.get("appearance", "")
                         break
-
-                char2_expr = first_row.get("char2_expression", "neutral")
-                char2_pose = first_row.get("char2_pose", "standing")
-                char2_pos = first_row.get("char2_pos", "right")
 
                 # Character image (background will be removed by rembg)
                 char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, full body, white background" if char2_appearance else ""
@@ -215,8 +265,7 @@ def convert_plot_to_json(
                 char2_slot["x_pos"] = position_map.get(char2_pos, 0.75)
                 images.append(char2_slot)
 
-            # Add background image slot
-            background_img = first_row.get("background_img", "simple background")
+            # Add background image slot (always present)
             bg_slot = ImageSlot(
                 slot_id="background",
                 type="background",
