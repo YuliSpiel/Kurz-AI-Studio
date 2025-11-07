@@ -288,11 +288,11 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         img_clip = ImageClip(img_url, duration=duration_sec)
 
                     # Handle different image types
-                    if img_type == "background":
-                        # Background: fill entire screen
+                    if img_type == "background" or img_type == "scene":
+                        # Background or Scene: fill entire screen
                         img_clip = img_clip.resized((width, height))
                         img_clip = img_clip.with_position(("center", "center"))
-                        logger.info(f"[{run_id}] Added background image")
+                        logger.info(f"[{run_id}] Added {img_type} image")
                     else:
                         # Character: resize and position based on x_pos
                         img_clip = img_clip.resized(height=height * 0.6)
@@ -300,10 +300,18 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         # Check for x_pos (Story Mode positioning)
                         if "x_pos" in img_slot:
                             x_pos = img_slot["x_pos"]  # 0.25 (left), 0.5 (center), 0.75 (right)
-                            x_pixel = int(x_pos * width)
-                            y_pixel = int(height * 0.5)  # Vertically centered
+
+                            # Position image center at x_pos (not left edge)
+                            img_width, img_height = img_clip.size
+                            x_center = int(x_pos * width)
+                            y_center = int(height * 0.5)
+
+                            # Calculate top-left corner position so center is at (x_center, y_center)
+                            x_pixel = x_center - (img_width // 2)
+                            y_pixel = y_center - (img_height // 2)
+
                             img_clip = img_clip.with_position((x_pixel, y_pixel), relative=False)
-                            logger.info(f"[{run_id}] Positioned character at x={x_pos:.2f} ({x_pixel}px)")
+                            logger.info(f"[{run_id}] Positioned character center at x={x_pos:.2f} ({x_center}px, image at {x_pixel}px)")
                         else:
                             # Legacy positioning by slot_id
                             slot_id = img_slot.get("slot_id", "center")
@@ -319,7 +327,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             # Composite video (without text yet)
             video_clip = CompositeVideoClip(image_clips, size=(width, height))
 
-            # Add text overlays (subtitles)
+            # Add text overlays (subtitles) - always at top with auto line wrapping
             text_clips = []
             for text_line in scene.get("texts", []):
                 text_content = text_line.get("text", "").strip('"')  # Remove quotes if present
@@ -327,7 +335,10 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     continue
 
                 try:
-                    # Create text clip
+                    # Create text clip with size constraint for auto line wrapping
+                    # Set max width to 90% of screen width for padding
+                    max_text_width = int(width * 0.9)
+
                     txt_clip = TextClip(
                         text=text_content,
                         font=KOREAN_FONT,
@@ -335,22 +346,17 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         color='white',
                         stroke_color='black',
                         stroke_width=2,
+                        size=(max_text_width, None),  # Auto line wrapping
+                        method='caption',  # Enable text wrapping
                         duration=duration_sec
                     )
 
-                    # Position text based on layout
-                    position = text_line.get("position", "bottom")
-                    if position == "top":
-                        txt_position = ('center', height * 0.1)
-                    elif position == "center":
-                        txt_position = ('center', 'center')
-                    else:  # bottom
-                        txt_position = ('center', height * 0.85)
-
+                    # Position text at top (10% from top, centered horizontally)
+                    txt_position = ('center', height * 0.1)
                     txt_clip = txt_clip.with_position(txt_position)
                     text_clips.append(txt_clip)
 
-                    logger.info(f"[{run_id}] Added subtitle: {text_content[:30]}...")
+                    logger.info(f"[{run_id}] Added subtitle at top: {text_content[:30]}...")
                 except Exception as e:
                     logger.warning(f"[{run_id}] Failed to create text overlay: {e}")
 

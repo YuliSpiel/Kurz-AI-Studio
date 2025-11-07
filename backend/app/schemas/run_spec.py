@@ -18,8 +18,8 @@ class CharacterInput(BaseModel):
 class RunSpec(BaseModel):
     """Input specification for a shorts generation run."""
 
-    mode: Literal["story", "ad"] = Field(
-        description="Generation mode: story (스토리텔링) or ad (광고)"
+    mode: Literal["general", "story", "ad"] = Field(
+        description="Generation mode: general (일반), story (스토리텔링), or ad (광고)"
     )
 
     prompt: str = Field(

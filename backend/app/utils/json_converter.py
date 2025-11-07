@@ -152,7 +152,7 @@ def convert_plot_to_json(
                     text=display_text,
                     text_type=text_type,
                     emotion=row.get("emotion", "neutral"),
-                    position=row.get("subtitle_position", "bottom"),
+                    position="top",  # Always top position
                     audio_url="",  # Will be filled by voice task
                     start_ms=idx * 2000,
                     duration_ms=duration_ms
@@ -189,10 +189,14 @@ def convert_plot_to_json(
             char2_pos_raw = first_row.get("char2_pos", "right")
             char2_pos = char2_pos_raw if char2_pos_raw else cache["char2_pos"]
 
-            background_img_raw = first_row.get("background_img", "simple background")
-            background_img = background_img_raw if background_img_raw else cache["background_img"]
+            background_img_raw = first_row.get("background_img")  # Can be None, "", or actual value
+            # Use cache if null or empty string
+            if background_img_raw is None or background_img_raw == "":
+                background_img = cache["background_img"]
+            else:
+                background_img = background_img_raw
 
-            # Update cache with new values (only if not empty)
+            # Update cache with new values (only if not null and not empty)
             if char1_id_raw is not None:
                 cache["char1_id"] = char1_id
             if char1_expr_raw:
@@ -209,14 +213,15 @@ def convert_plot_to_json(
                 cache["char2_pose"] = char2_pose
             if char2_pos_raw:
                 cache["char2_pos"] = char2_pos
-            if background_img_raw:
-                cache["background_img"] = background_img
+            if background_img_raw:  # Update cache only if not null and not empty
+                cache["background_img"] = background_img_raw
 
             # Position mapping for x-coordinate (for multi-character scenes)
+            # Adjusted for better separation with 2:3 aspect ratio character images
             position_map = {
-                "left": 0.25,
-                "center": 0.5,
-                "right": 0.75
+                "left": 0.2,      # 화면 왼쪽 20%
+                "center": 0.5,    # 정중앙 50%
+                "right": 0.8      # 화면 오른쪽 80%
             }
 
             # Add char1 if present (and not null)
@@ -228,8 +233,8 @@ def convert_plot_to_json(
                         break
 
                 # Character image (background will be removed by rembg)
-                # Fixed framing: from thighs up for consistency
-                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, from thighs up, upper body portrait, pure white background, centered composition" if char1_appearance else ""
+                # Fixed framing with strict composition rules
+                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, head to mid-thigh portrait, face at upper third of frame, body centered and fully visible, consistent scale, pure white background" if char1_appearance else ""
 
                 char1_slot = ImageSlot(
                     slot_id=f"{char1_id}_slot",
@@ -252,8 +257,8 @@ def convert_plot_to_json(
                         break
 
                 # Character image (background will be removed by rembg)
-                # Fixed framing: from thighs up for consistency
-                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, from thighs up, upper body portrait, pure white background, centered composition" if char2_appearance else ""
+                # Fixed framing with strict composition rules
+                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, head to mid-thigh portrait, face at upper third of frame, body centered and fully visible, consistent scale, pure white background" if char2_appearance else ""
 
                 char2_slot = ImageSlot(
                     slot_id=f"{char2_id}_slot",
@@ -279,34 +284,46 @@ def convert_plot_to_json(
             images.insert(0, bg_slot)  # Background goes first (z_index 0)
 
         else:
-            # Legacy Mode: Single character centered
-            char_id = first_row["char_id"]
-            char_appearance = ""
-            if characters_data:
+            # General Mode: Single unified image per scene (all characters + background)
+            # Collect all characters in this scene
+            scene_char_ids = set()
+            for row in scene_rows:
+                scene_char_ids.add(row["char_id"])
+
+            # Build character descriptions
+            char_descriptions = []
+            for char_id in sorted(scene_char_ids):
                 for char in characters_data:
                     if char["char_id"] == char_id:
                         char_appearance = char.get("appearance", "")
+                        if char_appearance:
+                            # Get expression and pose from first row with this char_id
+                            char_row = next((r for r in scene_rows if r["char_id"] == char_id), None)
+                            if char_row:
+                                expression = char_row.get("expression", "neutral")
+                                pose = char_row.get("pose", "standing")
+                                char_desc = f"{char_appearance}, {expression} expression, {pose} pose"
+                                char_descriptions.append(char_desc)
                         break
 
-            expression = first_row.get("expression", "neutral")
-            pose = first_row.get("pose", "standing")
+            # Get background/setting
+            background_desc = first_row.get("background_img", "simple background")
 
-            # Build image prompt with consistent framing
-            # Fixed framing: from thighs up for consistency
-            if char_appearance and expression != "none" and pose != "none":
-                image_prompt = f"{char_appearance}, {expression} expression, {pose} pose, from thighs up, upper body portrait, pure white background, centered composition"
-            elif char_appearance:
-                image_prompt = f"{char_appearance}, from thighs up, upper body portrait, pure white background, centered composition"
+            # Build unified scene image prompt
+            if char_descriptions:
+                chars_text = ", ".join(char_descriptions)
+                image_prompt = f"{chars_text}, {background_desc}, 9:16 aspect ratio, full scene composition"
             else:
-                image_prompt = ""
+                image_prompt = f"{background_desc}, 9:16 aspect ratio"
 
+            # Create single image slot for the entire scene
             images = [
                 ImageSlot(
-                    slot_id="center",
-                    type="character",
-                    ref_id=char_id,
+                    slot_id="scene",
+                    type="scene",  # New type for unified scene images
+                    ref_id=scene_id,
                     image_url="",  # Will be filled by designer
-                    z_index=1
+                    z_index=0
                 ).model_dump()
             ]
 

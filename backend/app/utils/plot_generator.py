@@ -169,7 +169,7 @@ JSON 형식:
 - text: 대사 또는 해설 내용
 - text_type: dialogue (대사) 또는 narration (해설)
 - emotion: neutral, happy, sad, excited, angry, surprised 중 하나
-- subtitle_position: top 또는 bottom
+- subtitle_position: 항상 "top" (자막은 항상 상단에 표시)
 - duration_ms: 장면 지속시간 (4000-6000)
 - background_img: 배경 이미지 생성 프롬프트 (예: "calm farm", "busy city street", 또는 "" = 이전 배경 유지)
 
@@ -234,7 +234,7 @@ JSON 예시:
       "text": "우주로 출발하자!",
       "text_type": "dialogue",
       "emotion": "excited",
-      "subtitle_position": "bottom",
+      "subtitle_position": "top",
       "duration_ms": 4500,
       "background_img": ""
     }},
@@ -252,7 +252,7 @@ JSON 예시:
       "text": "그들은 함께 우주선을 타고 떠났다.",
       "text_type": "narration",
       "emotion": "neutral",
-      "subtitle_position": "center",
+      "subtitle_position": "top",
       "duration_ms": 5000,
       "background_img": "starry night sky with rocket launching"
     }}
@@ -274,7 +274,7 @@ JSON 예시:
 - text: 대사 또는 해설 내용
 - text_type: dialogue (대사) 또는 narration (해설)
 - emotion: neutral, happy, sad, excited, angry, surprised 중 하나
-- subtitle_position: top 또는 bottom
+- subtitle_position: 항상 "top" (자막은 항상 상단에 표시)
 - duration_ms: 장면 지속시간 (4000-6000)
 
 **중요**:
@@ -303,7 +303,7 @@ JSON 형식:
       "text": "우주로 출발하자!",
       "text_type": "dialogue",
       "emotion": "excited",
-      "subtitle_position": "bottom",
+      "subtitle_position": "top",
       "duration_ms": 4500
     }}
   ]
@@ -417,7 +417,7 @@ def _generate_fallback(
                 "text": f"{prompt}의 {i+1}번째 장면입니다.",
                 "text_type": "dialogue",
                 "emotion": "neutral" if i % 2 == 0 else "happy",
-                "subtitle_position": "bottom" if i % 2 == 0 else "top",
+                "subtitle_position": "top",
                 "duration_ms": 5000,
                 "background_img": "simple background"
             })
@@ -431,7 +431,7 @@ def _generate_fallback(
                 "text": f"{prompt}의 {i+1}번째 장면입니다.",
                 "text_type": "dialogue",
                 "emotion": "neutral" if i % 2 == 0 else "happy",
-                "subtitle_position": "bottom" if i % 2 == 0 else "top",
+                "subtitle_position": "top",
                 "duration_ms": 5000
             })
 

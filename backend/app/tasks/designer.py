@@ -93,6 +93,9 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
             # Use stub - create placeholder images
 
         image_results = []
+        cached_background = None  # Cache for background image reuse
+        cached_background_prompt = None  # Track the prompt of cached background
+        cached_characters = {}  # Cache for character images: {prompt: image_path}
 
         # Generate images for each scene
         for scene in layout.get("scenes", []):
@@ -103,6 +106,32 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
             for img_slot in scene.get("images", []):
                 slot_id = img_slot["slot_id"]
                 img_type = img_type = img_slot["type"]
+
+                # Check for background reuse (Story Mode)
+                if img_type == "background" and "image_prompt" in img_slot:
+                    base_prompt = img_slot.get("image_prompt", "")
+
+                    # Reuse background if:
+                    # 1. Empty string (explicit reuse request), OR
+                    # 2. Same prompt as previously cached background
+                    if base_prompt == "" and cached_background:
+                        logger.info(f"[{run_id}] Reusing previous background (empty prompt) for {scene_id}")
+                        img_slot["image_url"] = cached_background
+                        image_results.append({
+                            "scene_id": scene_id,
+                            "slot_id": slot_id,
+                            "image_url": cached_background
+                        })
+                        continue  # Skip generation, use cached background
+                    elif base_prompt and base_prompt == cached_background_prompt and cached_background:
+                        logger.info(f"[{run_id}] Reusing previous background (same prompt) for {scene_id}: {base_prompt[:50]}...")
+                        img_slot["image_url"] = cached_background
+                        image_results.append({
+                            "scene_id": scene_id,
+                            "slot_id": slot_id,
+                            "image_url": cached_background
+                        })
+                        continue  # Skip generation, use cached background
 
                 # Check if image_prompt is pre-computed (Story Mode)
                 if "image_prompt" in img_slot and img_slot["image_prompt"]:
@@ -123,6 +152,18 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                             None
                         )
                         seed = char.get("seed", settings.BASE_CHAR_SEED) if char else settings.BASE_CHAR_SEED
+
+                        # Check character image cache (Story Mode)
+                        if img_type == "character" and base_prompt in cached_characters:
+                            cached_path = cached_characters[base_prompt]
+                            logger.info(f"[{run_id}] Reusing cached character image for {scene_id}/{slot_id}: {base_prompt[:50]}...")
+                            img_slot["image_url"] = cached_path
+                            image_results.append({
+                                "scene_id": scene_id,
+                                "slot_id": slot_id,
+                                "image_url": cached_path
+                            })
+                            continue  # Skip generation, use cached character
                 else:
                     # Legacy mode: Build prompt from scratch
                     if img_type == "character":
@@ -170,6 +211,11 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     elif img_type == "background":
                         prompt = f"background scene, {spec.get('art_style', '')}"
                         seed = scene.get("bg_seed", settings.BG_SEED_BASE)
+                    elif img_type == "scene":
+                        # General mode: unified scene image (characters + background)
+                        # Prompt already built in json_converter, just add art style
+                        prompt = f"{spec.get('art_style', '파스텔 수채화')}, {base_prompt}"
+                        seed = scene.get("bg_seed", settings.BG_SEED_BASE)
                     else:
                         prompt = f"prop, {spec.get('art_style', '')}"
                         seed = settings.BG_SEED_BASE + 100
@@ -179,11 +225,14 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
 
                 # Set dimensions based on image type for consistency
                 if img_type == "character":
-                    # Character: 2:3 ratio (portrait, from thighs up)
-                    width, height = 512, 768
+                    # Character: Generate larger image for cropping to standard size
+                    # Generate at 1.5x size, then crop to 512x768 for consistency
+                    gen_width, gen_height = 768, 1152
+                    target_width, target_height = 512, 768
                 else:
-                    # Background: 9:16 ratio (full vertical screen)
-                    width, height = 1080, 1920
+                    # Background or Scene: 9:16 ratio (full vertical screen)
+                    gen_width, gen_height = 1080, 1920
+                    target_width, target_height = gen_width, gen_height
 
                 image_path = None
                 if client:
@@ -193,8 +242,8 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                             image_path = client.generate_image(
                                 prompt=prompt,
                                 seed=seed,
-                                width=width,
-                                height=height,
+                                width=gen_width,
+                                height=gen_height,
                                 output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
                             )
                         elif provider == "comfyui":
@@ -228,6 +277,33 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     # Debug: Log conditions for background removal
                     logger.info(f"[{run_id}] [DEBUG] Checking rembg conditions: is_story_mode={is_story_mode}, img_type={img_type}, path_exists={Path(image_path).exists()}, image_path={image_path}")
 
+                    # Crop character images to standard size for consistency
+                    if img_type == "character" and Path(image_path).exists():
+                        try:
+                            from PIL import Image
+
+                            logger.info(f"[{run_id}] Cropping character image to standard size: {image_path}")
+
+                            img = Image.open(image_path)
+                            img_width, img_height = img.size
+
+                            # Target size: 512x768 (defined earlier)
+                            # Crop from center, slightly biased to top (for face positioning)
+                            left = (img_width - target_width) // 2
+                            top = int((img_height - target_height) * 0.35)  # Start at 35% to keep face in upper portion
+                            right = left + target_width
+                            bottom = top + target_height
+
+                            # Ensure crop dimensions are within image bounds
+                            if right <= img_width and bottom <= img_height:
+                                img_cropped = img.crop((left, top, right, bottom))
+                                img_cropped.save(image_path)
+                                logger.info(f"[{run_id}] Cropped to {target_width}x{target_height}: {image_path}")
+                            else:
+                                logger.warning(f"[{run_id}] Image too small to crop ({img_width}x{img_height}), keeping original")
+                        except Exception as e:
+                            logger.warning(f"[{run_id}] Image cropping failed: {e}, using original image")
+
                     # Apply background removal to character images (ONLY in Story Mode)
                     if is_story_mode and img_type == "character" and Path(image_path).exists():
                         try:
@@ -259,6 +335,20 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     "slot_id": slot_id,
                     "image_url": str(image_path)
                 })
+
+                # Cache background for reuse in next scenes
+                if img_type == "background":
+                    cached_background = str(image_path)
+                    # Store the prompt used for this background
+                    if "image_prompt" in img_slot:
+                        cached_background_prompt = img_slot["image_prompt"]
+                    logger.info(f"[{run_id}] Cached background for reuse: {cached_background}")
+
+                # Cache character image for reuse (Story Mode)
+                if img_type == "character" and "image_prompt" in img_slot:
+                    char_prompt = img_slot["image_prompt"]
+                    cached_characters[char_prompt] = str(image_path)
+                    logger.info(f"[{run_id}] Cached character image for reuse: {char_prompt[:50]}...")
 
                 logger.info(f"[{run_id}] Generated: {image_path}")
 
