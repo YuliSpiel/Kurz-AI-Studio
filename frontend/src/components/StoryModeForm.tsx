@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { createRun, uploadReferenceImage } from '../api/client'
 
 interface Character {
@@ -29,6 +29,44 @@ export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
   const [stylePreset, setStylePreset] = useState<string>('dreamy')
   const [numCuts, setNumCuts] = useState<number>(5)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Test mode: Ctrl+T (or Cmd+T) to fill with sample data
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 't') {
+        e.preventDefault()
+
+        // Fill with sample story data
+        setStoryText('작은 마을의 오후, 하늘은 노을빛으로 물들어 있었다.\n\n"오늘은 꼭 해보고 싶어." 루피가 말했다.\n\n"모험 말이야?" 미아가 물었다.\n\n"겁이 나도, 이번엔 도망치지 않을래."\n\n"좋아. 그럼 우리, 같이 가자."\n\n그들의 발밑에 긴 그림자가 나란히 드리워졌다.')
+
+        // Fill with sample characters
+        setCharacters([
+          {
+            name: '루피',
+            gender: 'male',
+            role: '주인공',
+            personality: '모험을 좋아하고 호기심이 많은 소년',
+            appearance: '짧은 갈색 머리, 밝은 파란색 티셔츠, 청바지를 입은 소년',
+          },
+          {
+            name: '미아',
+            gender: 'female',
+            role: '친구',
+            personality: '사려 깊고 친구들을 잘 챙기는 성격',
+            appearance: '긴 검은 머리, 노란색 원피스를 입은 소녀',
+          }
+        ])
+
+        setStylePreset('dreamy')
+        setNumCuts(5)
+
+        console.log('🧪 Test mode activated: Form filled with sample data')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const addCharacter = () => {
     if (characters.length < 3) {
