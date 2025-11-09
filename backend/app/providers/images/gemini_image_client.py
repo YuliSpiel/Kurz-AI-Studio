@@ -84,9 +84,13 @@ class GeminiImageClient:
 
                 result = response.json()
 
+                # Log API response for debugging
+                logger.debug(f"Gemini API response: {result}")
+
                 # Extract image from response
                 candidates = result.get("candidates", [])
                 if not candidates:
+                    logger.error(f"No candidates in Gemini API response: {result}")
                     raise ValueError("No candidates in Gemini API response")
 
                 # Find image in parts
@@ -97,6 +101,7 @@ class GeminiImageClient:
                         break
 
                 if not image_data:
+                    logger.error(f"No image data in Gemini API response. Full response: {result}")
                     raise ValueError("No image data in Gemini API response")
 
                 # Decode base64 image

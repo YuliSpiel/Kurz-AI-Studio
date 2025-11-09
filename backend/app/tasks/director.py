@@ -9,6 +9,7 @@ from pathlib import Path
 from app.celery_app import celery
 from app.orchestrator.fsm import RunState
 from app.utils.progress import publish_progress
+from app.utils.fonts import get_font_path
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,22 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         # Load JSON
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
+
+        # Get layout customization config
+        layout_config = layout.get("metadata", {}).get("layout_config", {})
+        title_bg_color = layout_config.get("title_bg_color", "#323296")  # Default dark blue
+        title_font_size = layout_config.get("title_font_size", 100)  # Updated default
+        subtitle_font_size = layout_config.get("subtitle_font_size", 80)  # Updated default
+
+        # Get font paths from font IDs
+        title_font_id = layout_config.get("title_font", "AppleGothic")
+        subtitle_font_id = layout_config.get("subtitle_font", "AppleGothic")
+        title_font_path = get_font_path(title_font_id)
+        subtitle_font_path = get_font_path(subtitle_font_id)
+
+        logger.info(f"[{run_id}] Layout config: {layout_config}")
+        logger.info(f"[{run_id}] Title font: {title_font_id} -> {title_font_path}")
+        logger.info(f"[{run_id}] Subtitle font: {subtitle_font_id} -> {subtitle_font_path}")
 
         # IMPORTANT: Update layout.json with asset URLs from chord results
         # This fixes race condition where parallel tasks overwrite each other's changes
@@ -98,7 +115,19 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                 for audio_result in result["audio"]:
                     if audio_result["type"] == "bgm":
                         bgm_path = audio_result["path"]
-                        if layout.get("global_bgm"):
+                        # Create global_bgm if it doesn't exist
+                        if not layout.get("global_bgm"):
+                            layout["global_bgm"] = {
+                                "bgm_id": audio_result.get("id", "global_bgm"),
+                                "genre": "ambient",
+                                "mood": "cinematic",
+                                "audio_url": bgm_path,
+                                "start_ms": 0,
+                                "duration_ms": layout.get("timeline", {}).get("total_duration_ms", 30000),
+                                "volume": 0.5
+                            }
+                            logger.info(f"[{run_id}] Created global BGM entry: {bgm_path}")
+                        else:
                             layout["global_bgm"]["audio_url"] = bgm_path
                             logger.info(f"[{run_id}] Updated global BGM: {bgm_path}")
 
@@ -221,39 +250,189 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
             logger.info(f"[{run_id}] Composing {scene_id}, duration={duration_sec}s")
 
-            # Create base background
-            bg_color = (20, 20, 40)  # Dark background
+            # Create base background - white for general mode, dark for story mode
+            mode = layout.get("mode", "story")
+            if mode == "general":
+                bg_color = (255, 255, 255)  # White background for general mode
+            else:
+                bg_color = (20, 20, 40)  # Dark background for story mode
+
             base_clip = VideoClip(
                 lambda t: np.full((height, width, 3), bg_color, dtype=np.uint8),
                 duration=duration_sec
             )
+            logger.info(f"[{run_id}] Using {'white' if mode == 'general' else 'dark'} base background for {mode} mode")
 
             # Layer images
             image_clips = [base_clip]
-            for img_slot in scene.get("images", []):
+
+            # Sort slots by z_index (background first, then characters)
+            sorted_slots = sorted(scene.get("images", []), key=lambda s: s.get("z_index", 1))
+
+            for img_slot in sorted_slots:
                 img_url = img_slot.get("image_url")
                 if img_url and Path(img_url).exists():
-                    # Load and position image (MoviePy 2.x uses duration parameter)
-                    img_clip = ImageClip(img_url, duration=duration_sec)
+                    img_type = img_slot.get("type", "character")
 
-                    # Resize to fit
-                    img_clip = img_clip.resized(height=height * 0.6)
+                    # Load image with proper transparency handling for PNG
+                    from PIL import Image as PILImage
 
-                    # Position based on slot
-                    slot_id = img_slot.get("slot_id", "center")
-                    if slot_id == "left":
-                        img_clip = img_clip.with_position(("left", "center"))
-                    elif slot_id == "right":
-                        img_clip = img_clip.with_position(("right", "center"))
+                    pil_img = PILImage.open(img_url)
+
+                    # Check if image has alpha channel (transparency)
+                    has_alpha = pil_img.mode in ('RGBA', 'LA') or (pil_img.mode == 'P' and 'transparency' in pil_img.info)
+
+                    if has_alpha and img_type == "character":
+                        # Character with transparency - use mask for proper compositing
+                        logger.info(f"[{run_id}] Loading transparent PNG: {img_url}")
+
+                        # Convert to RGBA if needed
+                        if pil_img.mode != 'RGBA':
+                            pil_img = pil_img.convert('RGBA')
+
+                        # Split RGB and alpha
+                        img_array = np.array(pil_img)
+                        rgb = img_array[:, :, :3]
+                        alpha = img_array[:, :, 3]
+
+                        # Create ImageClip from RGB array
+                        img_clip = ImageClip(rgb, duration=duration_sec, is_mask=False)
+
+                        # Create mask from alpha channel
+                        # Normalize alpha to 0-1 range for MoviePy
+                        alpha_normalized = alpha.astype(float) / 255.0
+                        mask_clip = ImageClip(alpha_normalized, duration=duration_sec, is_mask=True)
+
+                        # Apply mask to image
+                        img_clip = img_clip.with_mask(mask_clip)
+                        logger.info(f"[{run_id}] Applied transparency mask to character image")
                     else:
+                        # Background or image without alpha - load normally
+                        img_clip = ImageClip(img_url, duration=duration_sec)
+
+                    # Handle different image types
+                    if img_type == "background":
+                        # Background: always fill entire screen (9:16)
+                        img_clip = img_clip.resized((width, height))
                         img_clip = img_clip.with_position(("center", "center"))
+                        logger.info(f"[{run_id}] Added background image (full screen)")
+                    elif img_type == "scene":
+                        # Scene image: check aspect ratio
+                        aspect_ratio = img_slot.get("aspect_ratio", "9:16")
+
+                        if aspect_ratio == "1:1":
+                            # General Mode: 1:1 square image, positioned to match preview
+                            # Resize to fit width while maintaining aspect ratio
+                            img_clip = img_clip.resized(width=width)
+                            # Position image center at 60% of screen height (matching preview)
+                            img_height = img_clip.h
+                            # Calculate y so image center is at 60% of screen height
+                            y_position = int(height * 0.6 - img_height * 0.6)
+                            img_clip = img_clip.with_position(("center", y_position))
+                            # Store image position for subtitle placement
+                            scene_image_top_y = y_position
+                            logger.info(f"[{run_id}] Added 1:1 scene image (positioned at y={y_position}px, image center at 60% of screen)")
+                        else:
+                            # Story Mode or default: 9:16 image, fill screen
+                            img_clip = img_clip.resized((width, height))
+                            img_clip = img_clip.with_position(("center", "center"))
+                            logger.info(f"[{run_id}] Added 9:16 scene image (full screen)")
+                    else:
+                        # Character: resize and position based on x_pos
+                        img_clip = img_clip.resized(height=height * 0.6)
+
+                        # Check for x_pos (Story Mode positioning)
+                        if "x_pos" in img_slot:
+                            x_pos = img_slot["x_pos"]  # 0.25 (left), 0.5 (center), 0.75 (right)
+
+                            # Position image center at x_pos (not left edge)
+                            img_width, img_height = img_clip.size
+                            x_center = int(x_pos * width)
+                            y_center = int(height * 0.5)
+
+                            # Calculate top-left corner position so center is at (x_center, y_center)
+                            x_pixel = x_center - (img_width // 2)
+                            y_pixel = y_center - (img_height // 2)
+
+                            img_clip = img_clip.with_position((x_pixel, y_pixel), relative=False)
+                            logger.info(f"[{run_id}] Positioned character center at x={x_pos:.2f} ({x_center}px, image at {x_pixel}px)")
+                        else:
+                            # Legacy positioning by slot_id
+                            slot_id = img_slot.get("slot_id", "center")
+                            if slot_id == "left":
+                                img_clip = img_clip.with_position(("left", "center"))
+                            elif slot_id == "right":
+                                img_clip = img_clip.with_position(("right", "center"))
+                            else:
+                                img_clip = img_clip.with_position(("center", "center"))
 
                     image_clips.append(img_clip)
 
             # Composite video (without text yet)
             video_clip = CompositeVideoClip(image_clips, size=(width, height))
 
-            # Add text overlays (subtitles)
+            # Add title block at the top (auto-adjusting height)
+            title_text = layout.get("title", "")
+            title_height = 0  # Track title block height for subtitle positioning
+            if title_text:
+                try:
+                    # Convert hex color to RGB
+                    def hex_to_rgb(hex_color):
+                        hex_color = hex_color.lstrip('#')
+                        return [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
+
+                    title_rgb = hex_to_rgb(title_bg_color)
+
+                    # Create title text (bold and large) with max width to prevent overflow
+                    max_title_width = int(width * 0.95)  # 95% of width for more space
+
+                    # CRITICAL FIX: Give TextClip MUCH MORE HEIGHT than it thinks it needs
+                    # MoviePy's auto-calculated height is ALWAYS too small for Korean text with strokes
+                    # We need to manually specify a generous height to prevent clipping
+                    estimated_text_height = int(title_font_size * 3.5)  # 3.5x font size for generous space
+
+                    # NOTE: TextClip with method='caption' supports \n for line breaks
+                    # This is the correct way to handle multi-line titles
+                    title_clip = TextClip(
+                        text=title_text,
+                        font=title_font_path,  # Use selected font
+                        font_size=title_font_size,
+                        color='white',
+                        stroke_color='black',
+                        stroke_width=3,
+                        size=(max_title_width, estimated_text_height),  # EXPLICIT HEIGHT to prevent clipping
+                        method='caption',  # Enable text wrapping and multi-line support
+                        duration=duration_sec
+                    )
+
+                    # Calculate title block height - use the explicit height we set
+                    # Add minimal padding since we already gave generous height to TextClip
+                    padding_top = 20  # Small top padding
+                    padding_bottom = 20  # Small bottom padding
+
+                    title_height = estimated_text_height + padding_top + padding_bottom
+
+                    logger.info(f"[{run_id}] Title text height: {estimated_text_height}px, total block height: {title_height}px")
+
+                    # Create background rectangle for title (auto-sized)
+                    def make_title_bg(t):
+                        bg = np.full((title_height, width, 3), title_rgb, dtype=np.uint8)
+                        return bg
+
+                    title_bg_clip = VideoClip(make_title_bg, duration=duration_sec)
+                    title_bg_clip = title_bg_clip.with_position((0, 0))
+
+                    # Position title text centered horizontally
+                    title_clip = title_clip.with_position(('center', padding_top))
+
+                    # Add title block and text to the scene
+                    video_clip = CompositeVideoClip([video_clip, title_bg_clip, title_clip], size=(width, height))
+                    logger.info(f"[{run_id}] Added title block: {title_text} (color: {title_bg_color}, height: {title_height}px, size: {title_font_size}px)")
+                except Exception as e:
+                    logger.warning(f"[{run_id}] Failed to create title block: {e}")
+                    title_height = 0  # Reset on error
+
+            # Add text overlays (subtitles) - positioned between title and content
             text_clips = []
             for text_line in scene.get("texts", []):
                 text_content = text_line.get("text", "").strip('"')  # Remove quotes if present
@@ -261,30 +440,44 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     continue
 
                 try:
-                    # Create text clip
+                    # Create text clip with size constraint for auto line wrapping
+                    # Set max width to 90% of screen width for padding
+                    max_text_width = int(width * 0.9)
+
+                    # CRITICAL FIX: Give subtitle TextClip explicit generous height
+                    # Same issue as title - MoviePy underestimates height for Korean text
+                    estimated_subtitle_height = int(subtitle_font_size * 2.5)  # 2.5x font size for generous space
+
+                    # Use black text for general mode (white background), white text for story mode
+                    if mode == "general":
+                        text_color = 'black'
+                        stroke_color = 'white'
+                    else:
+                        text_color = 'white'
+                        stroke_color = 'black'
+
                     txt_clip = TextClip(
                         text=text_content,
-                        font=KOREAN_FONT,
-                        font_size=60,
-                        color='white',
-                        stroke_color='black',
+                        font=subtitle_font_path,  # Use selected font
+                        font_size=subtitle_font_size,
+                        color=text_color,
+                        stroke_color=stroke_color,
                         stroke_width=2,
+                        size=(max_text_width, estimated_subtitle_height),  # EXPLICIT HEIGHT to prevent clipping
+                        method='caption',  # Enable text wrapping
                         duration=duration_sec
                     )
 
-                    # Position text based on layout
-                    position = text_line.get("position", "bottom")
-                    if position == "top":
-                        txt_position = ('center', height * 0.1)
-                    elif position == "center":
-                        txt_position = ('center', 'center')
-                    else:  # bottom
-                        txt_position = ('center', height * 0.85)
+                    # Center subtitle between title block and image
+                    # Calculate available space and center the subtitle in it
+                    available_space = scene_image_top_y - title_height
+                    subtitle_y = title_height + (available_space - estimated_subtitle_height) / 2
 
+                    txt_position = ('center', subtitle_y)
                     txt_clip = txt_clip.with_position(txt_position)
                     text_clips.append(txt_clip)
 
-                    logger.info(f"[{run_id}] Added subtitle: {text_content[:30]}...")
+                    logger.info(f"[{run_id}] Added subtitle at y={subtitle_y} (estimated h={estimated_subtitle_height}px): {text_content[:30]}...")
                 except Exception as e:
                     logger.warning(f"[{run_id}] Failed to create text overlay: {e}")
 
@@ -307,7 +500,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             bgm_path = global_bgm["audio_url"]
             if Path(bgm_path).exists() and Path(bgm_path).stat().st_size > 100:
                 try:
-                    bgm_clip = AudioFileClip(bgm_path).with_volume_scaled(global_bgm.get("volume", 0.3))
+                    bgm_clip = AudioFileClip(bgm_path).with_volume_scaled(global_bgm.get("volume", 0.5))
                     audio_clips.append(bgm_clip)
                     logger.info(f"[{run_id}] Added BGM: {bgm_path}")
                 except Exception as e:
@@ -320,6 +513,9 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         for scene in layout.get("scenes", []):
             scene_duration = scene["duration_ms"] / 1000.0
 
+            # Track current position within scene for sequential audio playback
+            current_time_in_scene = 0.0
+
             for text_line in scene.get("texts", []):
                 audio_url = text_line.get("audio_url")
                 if audio_url and Path(audio_url).exists():
@@ -331,15 +527,23 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     try:
                         voice_clip = AudioFileClip(audio_url)
 
-                        # Calculate start time: scene start + text line start within scene
+                        # Use start_ms from layout if provided and non-zero, otherwise sequential
                         text_start_in_scene = text_line.get("start_ms", 0) / 1000.0
+
+                        # If start_ms is 0 or not properly set, use sequential timing
+                        if text_start_in_scene == 0 and current_time_in_scene > 0:
+                            text_start_in_scene = current_time_in_scene
+
                         absolute_start_time = scene_start_time + text_start_in_scene
 
                         # Set start time for this voice clip
                         voice_clip = voice_clip.with_start(absolute_start_time)
                         audio_clips.append(voice_clip)
 
-                        logger.info(f"[{run_id}] Added voice at {absolute_start_time:.2f}s: {audio_url}")
+                        # Update current time for next audio (add duration of this audio)
+                        current_time_in_scene = text_start_in_scene + voice_clip.duration
+
+                        logger.info(f"[{run_id}] Added voice at {absolute_start_time:.2f}s (duration: {voice_clip.duration:.2f}s): {audio_url}")
                     except Exception as e:
                         logger.warning(f"[{run_id}] Failed to load voice {audio_url}: {e}")
 

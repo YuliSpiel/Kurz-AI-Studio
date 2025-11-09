@@ -51,7 +51,8 @@ def plan_task(self, run_id: str, spec: dict):
             prompt=spec["prompt"],
             num_characters=spec["num_characters"],
             num_cuts=spec["num_cuts"],
-            mode=spec["mode"]
+            mode=spec["mode"],
+            characters=spec.get("characters")  # Pass user-provided characters (Story Mode)
         )
         logger.info(f"[{run_id}] Characters generated: {characters_path}")
         logger.info(f"[{run_id}] Plot JSON generated: {plot_json_path}")
@@ -64,7 +65,9 @@ def plan_task(self, run_id: str, spec: dict):
             plot_json_path=str(plot_json_path),
             run_id=run_id,
             art_style=spec.get("art_style", "파스텔 수채화"),
-            music_genre=spec.get("music_genre", "ambient")
+            music_genre=spec.get("music_genre", "ambient"),
+            video_title=spec.get("video_title"),
+            layout_config=spec.get("layout_config")
         )
         logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
         publish_progress(run_id, progress=0.2, log=f"JSON 레이아웃 생성 완료: {json_path}")

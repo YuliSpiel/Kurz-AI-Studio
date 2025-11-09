@@ -16,7 +16,9 @@ def convert_plot_to_json(
     plot_json_path: str,
     run_id: str,
     art_style: str = "파스텔 수채화",
-    music_genre: str = "ambient"
+    music_genre: str = "ambient",
+    video_title: str = None,
+    layout_config: dict = None
 ) -> Path:
     """
     Convert plot.json and characters.json to final layout.json.
@@ -26,6 +28,8 @@ def convert_plot_to_json(
         run_id: Run identifier
         art_style: Art style for image generation
         music_genre: Music genre for BGM
+        video_title: User-specified video title
+        layout_config: Layout customization settings (title_bg_color, fonts, etc.)
 
     Returns:
         Path to generated layout.json file
@@ -52,6 +56,11 @@ def convert_plot_to_json(
     rows = plot_data.get("scenes", [])
     if not rows:
         raise ValueError("Plot JSON has no scenes")
+
+    # Extract bgm_prompt and title if present
+    bgm_prompt = plot_data.get("bgm_prompt")
+    # Use user-specified title, or GPT-generated title, or fallback
+    final_title = video_title or plot_data.get("title", "")
 
     # Build JSON structure
     from app.schemas.json_layout import (
@@ -103,6 +112,23 @@ def convert_plot_to_json(
     scenes = []
     total_duration = 0
 
+    # Detect schema type from first row
+    first_scene_row = rows[0] if rows else {}
+    is_story_mode = "char1_id" in first_scene_row and "speaker" in first_scene_row
+
+    # Cache for previous scene values (for Story Mode)
+    cache = {
+        "char1_id": None,
+        "char1_expression": "neutral",
+        "char1_pose": "standing",
+        "char1_pos": "center",
+        "char2_id": None,
+        "char2_expression": "neutral",
+        "char2_pose": "standing",
+        "char2_pos": "right",
+        "background_img": "simple background"
+    }
+
     for scene_id, scene_rows in sorted(scenes_data.items(), key=lambda x: int(x[0].split("_")[1])):
         first_row = scene_rows[0]
         sequence = int(scene_id.split("_")[1])
@@ -120,14 +146,24 @@ def convert_plot_to_json(
             # text_type이 dialogue일 경우에만 큰따옴표 추가
             display_text = f'"{text}"' if text_type == "dialogue" else text
 
+            # Determine char_id for voice selection
+            if is_story_mode:
+                speaker = row.get("speaker", "narration")
+                # Keep speaker as-is (char_1, char_2, narration)
+                voice_char_id = speaker
+            else:
+                # General/Ad Mode: use "speaker" field
+                speaker = row.get("speaker", "narration")
+                voice_char_id = speaker
+
             texts.append(
                 TextLine(
                     line_id=line_id,
-                    char_id=row["char_id"],
+                    char_id=voice_char_id,
                     text=display_text,
                     text_type=text_type,
                     emotion=row.get("emotion", "neutral"),
-                    position=row.get("subtitle_position", "bottom"),
+                    position="top",  # Always top position
                     audio_url="",  # Will be filled by voice task
                     start_ms=idx * 2000,
                     duration_ms=duration_ms
@@ -135,38 +171,160 @@ def convert_plot_to_json(
             )
 
         # Create image slots
-        # Get character's appearance from characters_data if available
-        char_id = first_row["char_id"]
-        char_appearance = ""
-        if characters_data:
-            for char in characters_data:
-                if char["char_id"] == char_id:
-                    char_appearance = char.get("appearance", "")
-                    break
+        images = []
 
-        expression = first_row.get("expression", "neutral")
-        pose = first_row.get("pose", "standing")
+        if is_story_mode:
+            # Story Mode: Multiple characters with positioning
+            # Get values from plot, use cache if empty string ""
+            char1_id_raw = first_row.get("char1_id")
+            char1_id = char1_id_raw if char1_id_raw else cache["char1_id"]
 
-        # Build image prompt
-        if char_appearance and expression != "none" and pose != "none":
-            image_prompt = f"{char_appearance}, {expression} expression, {pose} pose"
-        elif char_appearance:
-            image_prompt = char_appearance
-        else:
-            image_prompt = ""
+            char1_expr_raw = first_row.get("char1_expression", "neutral")
+            char1_expr = char1_expr_raw if char1_expr_raw else cache["char1_expression"]
 
-        images = [
-            ImageSlot(
-                slot_id="center",
-                type="character",
-                ref_id=char_id,
-                image_url="",  # Will be filled by designer
-                z_index=1
+            char1_pose_raw = first_row.get("char1_pose", "standing")
+            char1_pose = char1_pose_raw if char1_pose_raw else cache["char1_pose"]
+
+            char1_pos_raw = first_row.get("char1_pos", "center")
+            char1_pos = char1_pos_raw if char1_pos_raw else cache["char1_pos"]
+
+            char2_id_raw = first_row.get("char2_id")
+            char2_id = char2_id_raw if char2_id_raw else cache["char2_id"]
+
+            char2_expr_raw = first_row.get("char2_expression", "neutral")
+            char2_expr = char2_expr_raw if char2_expr_raw else cache["char2_expression"]
+
+            char2_pose_raw = first_row.get("char2_pose", "standing")
+            char2_pose = char2_pose_raw if char2_pose_raw else cache["char2_pose"]
+
+            char2_pos_raw = first_row.get("char2_pos", "right")
+            char2_pos = char2_pos_raw if char2_pos_raw else cache["char2_pos"]
+
+            background_img_raw = first_row.get("background_img")  # Can be None, "", or actual value
+            # Use cache if null or empty string
+            if background_img_raw is None or background_img_raw == "":
+                background_img = cache["background_img"]
+            else:
+                background_img = background_img_raw
+
+            # Update cache with new values (only if not null and not empty)
+            if char1_id_raw is not None:
+                cache["char1_id"] = char1_id
+            if char1_expr_raw:
+                cache["char1_expression"] = char1_expr
+            if char1_pose_raw:
+                cache["char1_pose"] = char1_pose
+            if char1_pos_raw:
+                cache["char1_pos"] = char1_pos
+            if char2_id_raw is not None:
+                cache["char2_id"] = char2_id
+            if char2_expr_raw:
+                cache["char2_expression"] = char2_expr
+            if char2_pose_raw:
+                cache["char2_pose"] = char2_pose
+            if char2_pos_raw:
+                cache["char2_pos"] = char2_pos
+            if background_img_raw:  # Update cache only if not null and not empty
+                cache["background_img"] = background_img_raw
+
+            # Position mapping for x-coordinate (for multi-character scenes)
+            # Adjusted for better separation with 2:3 aspect ratio character images
+            position_map = {
+                "left": 0.2,      # 화면 왼쪽 20%
+                "center": 0.5,    # 정중앙 50%
+                "right": 0.8      # 화면 오른쪽 80%
+            }
+
+            # Add char1 if present (and not null)
+            if char1_id:
+                char1_appearance = ""
+                for char in characters_data:
+                    if char["char_id"] == char1_id:
+                        char1_appearance = char.get("appearance", "")
+                        break
+
+                # Character image (background will be removed by rembg)
+                # Fixed framing with strict composition rules
+                char1_prompt = f"{char1_appearance}, {char1_expr} expression, {char1_pose} pose, head to mid-thigh portrait, face at upper third of frame, body centered and fully visible, consistent scale, pure white background" if char1_appearance else ""
+
+                char1_slot = ImageSlot(
+                    slot_id=f"{char1_id}_slot",
+                    type="character",
+                    ref_id=char1_id,
+                    image_url="",
+                    z_index=2
+                ).model_dump()
+                char1_slot["image_prompt"] = char1_prompt
+                char1_slot["position"] = char1_pos
+                char1_slot["x_pos"] = position_map.get(char1_pos, 0.5)
+                images.append(char1_slot)
+
+            # Add char2 if present (and not null)
+            if char2_id:
+                char2_appearance = ""
+                for char in characters_data:
+                    if char["char_id"] == char2_id:
+                        char2_appearance = char.get("appearance", "")
+                        break
+
+                # Character image (background will be removed by rembg)
+                # Fixed framing with strict composition rules
+                char2_prompt = f"{char2_appearance}, {char2_expr} expression, {char2_pose} pose, head to mid-thigh portrait, face at upper third of frame, body centered and fully visible, consistent scale, pure white background" if char2_appearance else ""
+
+                char2_slot = ImageSlot(
+                    slot_id=f"{char2_id}_slot",
+                    type="character",
+                    ref_id=char2_id,
+                    image_url="",
+                    z_index=2
+                ).model_dump()
+                char2_slot["image_prompt"] = char2_prompt
+                char2_slot["position"] = char2_pos
+                char2_slot["x_pos"] = position_map.get(char2_pos, 0.75)
+                images.append(char2_slot)
+
+            # Add background image slot (always present)
+            bg_slot = ImageSlot(
+                slot_id="background",
+                type="background",
+                ref_id=scene_id,
+                image_url="",
+                z_index=0
             ).model_dump()
-        ]
+            bg_slot["image_prompt"] = background_img
+            images.insert(0, bg_slot)  # Background goes first (z_index 0)
 
-        # Store image_prompt in metadata (for designer task)
-        images[0]["image_prompt"] = image_prompt
+        else:
+            # General Mode: Use image_prompt directly from plot.json
+            # The image_prompt is already provided in the scene data
+            image_prompt_raw = first_row.get("image_prompt", "")
+
+            # If image_prompt is empty string "", reuse previous scene's image
+            # (handled by designer - we still create the slot but mark it for reuse)
+            if image_prompt_raw == "" and sequence > 1:
+                # Empty prompt means reuse previous image
+                logger.debug(f"Scene {scene_id}: Empty image_prompt, will reuse previous image")
+                image_prompt = ""  # Designer will handle reuse
+            else:
+                # Use provided prompt or fallback
+                image_prompt = image_prompt_raw if image_prompt_raw else "simple background"
+
+            # Create single image slot for the scene (1:1 ratio, white background)
+            images = [
+                ImageSlot(
+                    slot_id="scene",
+                    type="scene",  # Unified scene image type
+                    ref_id=scene_id,
+                    image_url="",  # Will be filled by designer
+                    z_index=0
+                ).model_dump()
+            ]
+
+            # Store image_prompt for designer task
+            images[0]["image_prompt"] = image_prompt
+            # Add metadata for general mode image generation
+            images[0]["aspect_ratio"] = "1:1"  # General mode uses 1:1 images
+            images[0]["background"] = "white"  # White background for transparency removal
 
         # SFX
         sfx_list = []
@@ -207,21 +365,40 @@ def convert_plot_to_json(
     )
 
     # Create final JSON
+    metadata_dict = {
+        "art_style": art_style,
+        "music_genre": music_genre,
+        "generated_from": str(plot_json_path),
+        "characters_file": str(characters_json_path) if characters_json_path.exists() else None
+    }
+
+    # Add bgm_prompt if present (General/Ad Mode)
+    if bgm_prompt:
+        metadata_dict["bgm_prompt"] = bgm_prompt
+        logger.info(f"Added bgm_prompt to metadata: {bgm_prompt}")
+
+    # Add layout_config if present
+    if layout_config:
+        metadata_dict["layout_config"] = layout_config
+        logger.info(f"Added layout_config to metadata: {layout_config}")
+
+    # Determine mode from schema detection
+    mode_value = "story" if is_story_mode else "general"
+    logger.info(f"Layout mode: {mode_value}")
+
     shorts_json = ShortsJSON(
         project_id=run_id,
-        title=f"AutoShorts {run_id}",
-        mode="story",
+        title=final_title if final_title else f"AutoShorts {run_id}",
+        mode=mode_value,
         timeline=timeline.model_dump(),
         characters=characters,
         scenes=scenes,
         global_bgm=None,
-        metadata={
-            "art_style": art_style,
-            "music_genre": music_genre,
-            "generated_from": str(plot_json_path),
-            "characters_file": str(characters_json_path) if characters_json_path.exists() else None
-        }
+        metadata=metadata_dict
     )
+
+    if final_title:
+        logger.info(f"Using title: {final_title}")
 
     # Write layout JSON
     json_path = plot_json_path.parent / "layout.json"

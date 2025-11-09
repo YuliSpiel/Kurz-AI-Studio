@@ -5,20 +5,32 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional, Dict, List
 
 
+class CharacterInput(BaseModel):
+    """Character information for Story Mode."""
+    name: str
+    gender: Literal["male", "female", "other"]
+    role: str
+    personality: str
+    appearance: str
+    reference_image: Optional[str] = None
+
+
 class RunSpec(BaseModel):
     """Input specification for a shorts generation run."""
 
-    mode: Literal["story", "ad"] = Field(
-        description="Generation mode: story (스토리텔링) or ad (광고)"
+    mode: Literal["general", "story", "ad"] = Field(
+        description="Generation mode: general (일반), story (스토리텔링), or ad (광고)"
     )
 
     prompt: str = Field(
         description="줄글 요청 (예: '우주를 여행하는 고양이 이야기')"
     )
 
-    num_characters: Literal[1, 2] = Field(
+    num_characters: int = Field(
         default=1,
-        description="등장인물 수 (1 or 2)"
+        ge=1,
+        le=3,
+        description="등장인물 수 (1-3, Story Mode에서는 최대 3명)"
     )
 
     num_cuts: int = Field(
@@ -38,6 +50,11 @@ class RunSpec(BaseModel):
         description="음악 장르 (예: ambient, cinematic, upbeat)"
     )
 
+    video_title: Optional[str] = Field(
+        default=None,
+        description="사용자 지정 영상 제목"
+    )
+
     reference_images: Optional[List[str]] = Field(
         default=None,
         description="업로드된 참조 이미지 파일명 리스트"
@@ -54,6 +71,18 @@ class RunSpec(BaseModel):
     voice_id: Optional[str] = Field(
         default=None,
         description="TTS 음성 ID (선택적)"
+    )
+
+    # Story Mode specific fields
+    characters: Optional[List[CharacterInput]] = Field(
+        default=None,
+        description="캐릭터 정보 리스트 (Story Mode에서 사용)"
+    )
+
+    # Layout customization
+    layout_config: Optional[Dict] = Field(
+        default=None,
+        description="레이아웃 커스터마이징 설정 (title_bg_color, title_font, title_font_size, subtitle_font, subtitle_font_size)"
     )
 
 

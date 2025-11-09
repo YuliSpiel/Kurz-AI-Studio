@@ -52,12 +52,81 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
 
         voice_results = []
 
-        # Map characters to voice profiles
+        # Load voices.json for smart voice matching
+        voices_config = None
+        voices_path = Path("voices.json")
+        if voices_path.exists():
+            with open(voices_path, "r", encoding="utf-8") as f:
+                voices_config = json.load(f)
+            logger.info(f"[{run_id}] Loaded voices.json for voice matching")
+
+        # Load characters.json for gender/personality info
+        characters_json_path = Path(json_path).parent / "characters.json"
+        characters_data = {}
+        if characters_json_path.exists():
+            with open(characters_json_path, "r", encoding="utf-8") as f:
+                characters_data = json.load(f)
+            logger.info(f"[{run_id}] Loaded characters.json for voice matching")
+
+        # Map characters to voice IDs
         char_voices = {}
         for char in layout.get("characters", []):
             char_id = char["char_id"]
-            voice_profile = spec.get("voice_id") or char.get("voice_profile", "default")
-            char_voices[char_id] = voice_profile
+
+            # Use explicit voice_id from spec if provided (for backwards compatibility)
+            if spec.get("voice_id"):
+                voice_id = spec.get("voice_id")
+                logger.info(f"[{run_id}] Using voice_id from spec for {char_id}: {voice_id}")
+            # Try to get voice_id from characters.json (primary method)
+            elif characters_data:
+                char_data = next(
+                    (c for c in characters_data.get("characters", []) if c["char_id"] == char_id),
+                    None
+                )
+                if char_data and "voice_id" in char_data:
+                    voice_id = char_data["voice_id"]
+                    logger.info(f"[{run_id}] Using voice_id from characters.json for {char_id}: {voice_id}")
+                else:
+                    # Fallback to layout.json voice_profile or default
+                    voice_id = char.get("voice_profile", "default")
+                    logger.warning(f"[{run_id}] No voice_id in characters.json for {char_id}, using fallback: {voice_id}")
+            else:
+                # Fallback if characters.json not available
+                voice_id = char.get("voice_profile", "default")
+                logger.warning(f"[{run_id}] No characters.json, using fallback voice for {char_id}: {voice_id}")
+
+            char_voices[char_id] = voice_id
+
+        # Add narration voice if needed (for general mode or story mode narration)
+        if "narration" not in char_voices:
+            # Try to get from characters.json first
+            if characters_data:
+                narration_char = next(
+                    (c for c in characters_data.get("characters", []) if c["char_id"] == "narration"),
+                    None
+                )
+                if narration_char and "voice_id" in narration_char:
+                    char_voices["narration"] = narration_char["voice_id"]
+                    logger.info(f"[{run_id}] Using narration voice from characters.json: {narration_char['voice_id']}")
+                elif voices_config:
+                    # Fallback: use default narrator voice from voices.json
+                    female_voices = voices_config.get("voices", {}).get("female", [])
+                    if female_voices:
+                        # Look for Anna Kim (narration specialist) or use first
+                        anna_voice = next((v for v in female_voices if "Anna" in v.get("name", "")), female_voices[0])
+                        char_voices["narration"] = anna_voice["voice_id"]
+                        logger.info(f"[{run_id}] Using fallback narration voice: {anna_voice['name']}")
+                    else:
+                        char_voices["narration"] = "default"
+            elif voices_config:
+                # No characters.json, use voices.json fallback
+                female_voices = voices_config.get("voices", {}).get("female", [])
+                if female_voices:
+                    anna_voice = next((v for v in female_voices if "Anna" in v.get("name", "")), female_voices[0])
+                    char_voices["narration"] = anna_voice["voice_id"]
+                    logger.info(f"[{run_id}] Using fallback narration voice: {anna_voice['name']}")
+                else:
+                    char_voices["narration"] = "default"
 
         # Generate TTS for each text line
         for scene in layout.get("scenes", []):
@@ -90,16 +159,49 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
                     output_filename=str(audio_dir / f"{scene_id}_{line_id}.mp3")
                 )
 
+                # Measure audio duration
+                try:
+                    from moviepy.editor import AudioFileClip
+                    with AudioFileClip(str(audio_path)) as audio_clip:
+                        audio_duration_ms = int(audio_clip.duration * 1000)
+                    logger.info(f"[{run_id}] Audio duration: {audio_duration_ms}ms for {scene_id}/{line_id}")
+                except Exception as e:
+                    logger.warning(f"[{run_id}] Failed to measure audio duration: {e}, using default")
+                    audio_duration_ms = None
+
                 # Update JSON
                 text_line["audio_url"] = str(audio_path)
 
                 voice_results.append({
                     "scene_id": scene_id,
                     "line_id": line_id,
-                    "audio_url": str(audio_path)
+                    "audio_url": str(audio_path),
+                    "audio_duration_ms": audio_duration_ms
                 })
 
                 logger.info(f"[{run_id}] Generated: {audio_path}")
+
+        # Update scene durations based on TTS lengths
+        for scene in layout.get("scenes", []):
+            scene_id = scene["scene_id"]
+
+            # Find all audio durations for this scene
+            scene_audio_durations = [
+                result["audio_duration_ms"]
+                for result in voice_results
+                if result["scene_id"] == scene_id and result["audio_duration_ms"] is not None
+            ]
+
+            if scene_audio_durations:
+                # Use the longest audio duration for the scene, plus 500ms padding
+                max_audio_duration = max(scene_audio_durations)
+                new_duration = max_audio_duration + 500  # Add 500ms padding
+                old_duration = scene.get("duration_ms", 5000)
+
+                scene["duration_ms"] = new_duration
+                logger.info(f"[{run_id}] Updated {scene_id} duration: {old_duration}ms → {new_duration}ms (based on TTS: {max_audio_duration}ms)")
+            else:
+                logger.warning(f"[{run_id}] No audio duration found for {scene_id}, keeping original duration")
 
         # Save updated JSON
         with open(json_path, "w", encoding="utf-8") as f:

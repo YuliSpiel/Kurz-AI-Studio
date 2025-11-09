@@ -41,15 +41,210 @@ body {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
-/* Run Form */
+/* Mode Selector */
+.mode-selector {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-bottom: 40px;
+  padding-bottom: 30px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.mode-btn {
+  padding: 12px 30px;
+  background: white;
+  color: #667eea;
+  border: 2px solid #667eea;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mode-btn:hover:not(:disabled) {
+  background: #f0f4ff;
+  transform: translateY(-2px);
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Run Form Wrapper */
+.run-form-wrapper {
+  max-width: 100%;
+}
+
 .run-form {
-  max-width: 600px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin-bottom: 40px;
+}
+
+/* Layout Customization Section */
+.layout-customization-section {
+  background: #f9f9f9;
+  border-radius: 12px;
+  padding: 30px;
+  border: 2px solid #e0e0e0;
+}
+
+.layout-customization-section h3 {
+  margin-bottom: 25px;
+  color: #667eea;
+  font-size: 1.3rem;
+}
+
+.layout-customization-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 40px;
+  align-items: start;
+  margin-bottom: 30px;
+}
+
+.layout-preview {
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  aspect-ratio: 9 / 16;
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.preview-title-block {
+  transition: all 0.3s ease;
+}
+
+.preview-content {
+  transition: all 0.3s ease;
 }
 
 .run-form h2 {
-  margin-bottom: 30px;
+  margin-bottom: 10px;
   color: #667eea;
+}
+
+.mode-description {
+  margin-bottom: 30px;
+  color: #777;
+  font-size: 0.95rem;
+  font-style: italic;
+}
+
+/* Story Mode specific styles */
+.story-mode-form h2 {
+  color: #28a745;
+}
+
+.story-mode-form .btn-submit {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+/* Characters Section */
+.characters-section {
+  margin: 30px 0;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.section-header label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #28a745;
+}
+
+.btn-add-character {
+  padding: 8px 16px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.btn-add-character:hover:not(:disabled) {
+  background: #218838;
+}
+
+.btn-add-character:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.character-card {
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.character-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.character-card-header h3 {
+  margin: 0;
+  color: #28a745;
+  font-size: 1.1rem;
+}
+
+.btn-remove-character {
+  padding: 6px 12px;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.btn-remove-character:hover {
+  background: #c82333;
+}
+
+.file-name {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: #28a745;
+  font-style: italic;
+}
+
+/* Ad Mode specific styles */
+.ad-mode-form h2 {
+  color: #fd7e14;
+}
+
+.ad-mode-form .btn-submit {
+  background: linear-gradient(135deg, #fd7e14 0%, #e63946 100%);
 }
 
 .form-group {
@@ -95,15 +290,16 @@ body {
 
 .btn-submit {
   width: 100%;
-  padding: 14px;
+  padding: 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  border-radius: 6px;
-  font-size: 1.1rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s;
+  margin-top: 10px;
 }
 
 .btn-submit:hover:not(:disabled) {
