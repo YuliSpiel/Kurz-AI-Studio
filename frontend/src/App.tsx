@@ -77,8 +77,8 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>AutoShorts</h1>
-        <p>스토리텔링형 숏츠 자동 제작 시스템</p>
+        <h1>Kurz AI Studio</h1>
+        <p>AI 기반 숏폼 콘텐츠 자동 생성 플랫폼</p>
       </header>
 
       <main className="main">

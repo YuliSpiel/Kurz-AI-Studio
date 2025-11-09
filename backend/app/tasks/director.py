@@ -321,14 +321,17 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         aspect_ratio = img_slot.get("aspect_ratio", "9:16")
 
                         if aspect_ratio == "1:1":
-                            # General Mode: 1:1 square image, slightly below center
+                            # General Mode: 1:1 square image, positioned to match preview
                             # Resize to fit width while maintaining aspect ratio
                             img_clip = img_clip.resized(width=width)
-                            # Position slightly below center (60% from top instead of 50%)
+                            # Position image center at 60% of screen height (matching preview)
                             img_height = img_clip.h
-                            y_position = int((height - img_height) * 0.6)  # 60% from top
+                            # Calculate y so image center is at 60% of screen height
+                            y_position = int(height * 0.6 - img_height * 0.6)
                             img_clip = img_clip.with_position(("center", y_position))
-                            logger.info(f"[{run_id}] Added 1:1 scene image (positioned at y={y_position}px)")
+                            # Store image position for subtitle placement
+                            scene_image_top_y = y_position
+                            logger.info(f"[{run_id}] Added 1:1 scene image (positioned at y={y_position}px, image center at 60% of screen)")
                         else:
                             # Story Mode or default: 9:16 image, fill screen
                             img_clip = img_clip.resized((width, height))
@@ -419,7 +422,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                     title_bg_clip = VideoClip(make_title_bg, duration=duration_sec)
                     title_bg_clip = title_bg_clip.with_position((0, 0))
 
-                    # Position title text with top padding
+                    # Position title text centered horizontally
                     title_clip = title_clip.with_position(('center', padding_top))
 
                     # Add title block and text to the scene
@@ -465,11 +468,10 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         duration=duration_sec
                     )
 
-                    # Position text just below title block with minimal padding
-                    # We already gave generous height to TextClip, so just small spacing
-                    subtitle_top_padding = 30  # pixels from title block
-
-                    subtitle_y = title_height + subtitle_top_padding
+                    # Center subtitle between title block and image
+                    # Calculate available space and center the subtitle in it
+                    available_space = scene_image_top_y - title_height
+                    subtitle_y = title_height + (available_space - estimated_subtitle_height) / 2
 
                     txt_position = ('center', subtitle_y)
                     txt_clip = txt_clip.with_position(txt_position)
