@@ -72,18 +72,54 @@ class GeminiLLMClient:
             logger.info(f"[GEMINI] Generating text with temperature={temperature}, max_tokens={max_tokens}")
             logger.debug(f"[GEMINI] Prompt length: {len(combined_prompt)} chars")
 
-            # Generate content
+            # Generate content with safety settings
+            from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+            safety_settings = [
+                {
+                    "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    "threshold": HarmBlockThreshold.BLOCK_NONE,
+                },
+                {
+                    "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    "threshold": HarmBlockThreshold.BLOCK_NONE,
+                },
+                {
+                    "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    "threshold": HarmBlockThreshold.BLOCK_NONE,
+                },
+                {
+                    "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    "threshold": HarmBlockThreshold.BLOCK_NONE,
+                },
+            ]
+
             response = self.model.generate_content(
                 combined_prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=temperature,
                     max_output_tokens=max_tokens,
                 ),
+                safety_settings=safety_settings,
             )
 
             # Extract text from response
             if not response.candidates:
                 raise ValueError("No candidates in response")
+
+            # Check for blocked responses
+            candidate = response.candidates[0]
+            finish_reason = candidate.finish_reason
+
+            logger.debug(f"[GEMINI] Finish reason: {finish_reason}")
+            logger.debug(f"[GEMINI] Safety ratings: {candidate.safety_ratings}")
+
+            # finish_reason: 1=STOP (success), 2=SAFETY, 3=RECITATION, 4=OTHER, 5=MAX_TOKENS
+            if finish_reason not in [1, 5]:  # Allow STOP and MAX_TOKENS
+                raise ValueError(
+                    f"Response blocked with finish_reason={finish_reason}. "
+                    f"Safety ratings: {candidate.safety_ratings}"
+                )
 
             result_text = response.text
 

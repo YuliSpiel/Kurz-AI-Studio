@@ -31,36 +31,29 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
     """
     logger.info(f"[ENHANCE] Analyzing prompt: '{original_prompt[:50]}...'")
 
-    # Build enhancement prompt
-    system_prompt = f"""당신은 숏폼 영상 제작 전문가입니다. 사용자가 입력한 프롬프트를 분석하여 최적의 영상 제작 파라미터를 제안해주세요.
+    # Build enhancement prompt (using English to avoid safety filters)
+    system_prompt = f"""You are a short-form video production expert. Analyze the user's prompt and suggest optimal parameters.
 
-모드: {mode}
+Mode: {mode}
 
-분석 기준:
-1. **프롬프트 풍부화**: 원본 프롬프트를 더 구체적이고 시각적으로 표현력있게 개선
-2. **컷 수 (num_cuts)**: 내용의 복잡도와 분량에 따라 1-10개 사이로 제안
-   - 간단한 메시지: 1-3컷
-   - 일반적인 스토리: 3-5컷
-   - 복잡한 이야기: 5-10컷
-3. **화풍 (art_style)**: 프롬프트의 분위기와 주제에 맞는 화풍 제안
-   - 예: "파스텔 수채화", "애니메이션 스타일", "사실적인 유화", "미니멀 일러스트", "다이나믹 만화풍"
-4. **음악 장르 (music_genre)**: 영상의 분위기에 맞는 음악 제안
-   - 예: "ambient", "cinematic", "upbeat", "emotional piano", "energetic electronic"
-5. **등장인물 수 (num_characters)**: 스토리에 필요한 캐릭터 수 (1-2명)
+Please provide:
+1. Enhanced prompt: Make it more specific and visual (output in Korean)
+2. Number of cuts: 1-10 based on complexity
+3. Art style: Match the theme
+4. Music genre: Match the mood
+5. Number of characters: 1-2
 
-응답 형식 (JSON):
+Return ONLY this JSON format:
 {{
-  "enhanced_prompt": "풍부화된 프롬프트 (한국어, 구체적이고 시각적인 표현)",
+  "enhanced_prompt": "enhanced version in Korean",
   "suggested_num_cuts": 3,
-  "suggested_art_style": "파스텔 수채화",
-  "suggested_music_genre": "ambient",
+  "suggested_art_style": "art style name",
+  "suggested_music_genre": "genre name",
   "suggested_num_characters": 1,
-  "reasoning": "제안 이유에 대한 간단한 설명 (1-2문장)"
-}}
+  "reasoning": "explanation in Korean"
+}}"""
 
-중요: 반드시 valid JSON만 반환하세요. 마크다운 코드 블록이나 추가 설명 없이 순수 JSON만 출력하세요."""
-
-    user_prompt = f"원본 프롬프트: {original_prompt}"
+    user_prompt = f"Original prompt: {original_prompt}"
 
     try:
         # Initialize Gemini client
@@ -76,7 +69,7 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=2000
         )
 
         logger.info(f"[ENHANCE] Raw LLM response: {response_text[:200]}...")
