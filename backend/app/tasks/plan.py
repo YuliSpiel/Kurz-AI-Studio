@@ -45,7 +45,7 @@ def plan_task(self, run_id: str, spec: dict):
 
         # Step 1: Generate characters and plot
         logger.info(f"[{run_id}] Generating characters and plot from prompt...")
-        publish_progress(run_id, progress=0.12, log="캐릭터 및 시나리오 생성 중 (GPT-4o-mini)...")
+        publish_progress(run_id, progress=0.12, log="캐릭터 및 시나리오 생성 중 (Gemini 2.5 Flash)...")
         characters_path, plot_json_path = generate_plot_with_characters(
             run_id=run_id,
             prompt=spec["prompt"],
