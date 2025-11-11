@@ -31,29 +31,19 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
     """
     logger.info(f"[ENHANCE] Analyzing prompt: '{original_prompt[:50]}...'")
 
-    # Build enhancement prompt (using English to avoid safety filters)
-    system_prompt = f"""You are a short-form video production expert. Analyze the user's prompt and suggest optimal parameters.
+    # Build enhancement prompt (concise to reduce tokens)
+    system_prompt = f"""Analyze this video prompt and return JSON only. Be concise.
 
-Mode: {mode}
-
-Please provide:
-1. Enhanced prompt: Make it more specific and visual (output in Korean)
-2. Number of cuts: 1-10 based on complexity
-3. Art style: Match the theme
-4. Music genre: Match the mood
-5. Number of characters: 1-2
-
-Return ONLY this JSON format:
 {{
-  "enhanced_prompt": "enhanced version in Korean",
-  "suggested_num_cuts": 3,
-  "suggested_art_style": "art style name",
-  "suggested_music_genre": "genre name",
-  "suggested_num_characters": 1,
-  "reasoning": "explanation in Korean"
+  "enhanced_prompt": "detailed Korean description",
+  "suggested_num_cuts": 1-10,
+  "suggested_art_style": "style name",
+  "suggested_music_genre": "genre",
+  "suggested_num_characters": 1-2,
+  "reasoning": "brief Korean explanation (max 2 sentences)"
 }}"""
 
-    user_prompt = f"Original prompt: {original_prompt}"
+    user_prompt = f"Prompt: {original_prompt}\nMode: {mode}"
 
     try:
         # Initialize Gemini client

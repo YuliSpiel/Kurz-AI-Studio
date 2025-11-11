@@ -111,13 +111,14 @@ class GeminiLLMClient:
             candidate = response.candidates[0]
             finish_reason = candidate.finish_reason
 
-            logger.debug(f"[GEMINI] Finish reason: {finish_reason}")
+            logger.debug(f"[GEMINI] Finish reason: {finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'})")
             logger.debug(f"[GEMINI] Safety ratings: {candidate.safety_ratings}")
 
-            # finish_reason: 1=STOP (success), 2=SAFETY, 3=RECITATION, 4=OTHER, 5=MAX_TOKENS
-            if finish_reason not in [1, 5]:  # Allow STOP and MAX_TOKENS
+            # finish_reason enum: 1=STOP (success), 2=MAX_TOKENS (hit limit), 3=SAFETY (blocked), 4=RECITATION, 5=OTHER
+            # Allow STOP (1) and MAX_TOKENS (2) - both provide usable content
+            if finish_reason not in [1, 2]:
                 raise ValueError(
-                    f"Response blocked with finish_reason={finish_reason}. "
+                    f"Response blocked with finish_reason={finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'}). "
                     f"Safety ratings: {candidate.safety_ratings}"
                 )
 
