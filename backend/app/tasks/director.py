@@ -56,6 +56,7 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
         # Get layout customization config
         layout_config = layout.get("metadata", {}).get("layout_config", {})
+        use_title_block = layout_config.get("use_title_block", True)  # Default to True for backward compatibility
         title_bg_color = layout_config.get("title_bg_color", "#323296")  # Default dark blue
         title_font_size = layout_config.get("title_font_size", 100)  # Updated default
         subtitle_font_size = layout_config.get("subtitle_font_size", 80)  # Updated default
@@ -66,6 +67,10 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         title_font_path = get_font_path(title_font_id)
         subtitle_font_path = get_font_path(subtitle_font_id)
 
+        # DEBUG: Log title configuration
+        project_title = layout.get("title", "")
+        logger.info(f"[{run_id}] Project title: '{project_title}'")
+        logger.info(f"[{run_id}] use_title_block: {use_title_block}")
         logger.info(f"[{run_id}] Layout config: {layout_config}")
         logger.info(f"[{run_id}] Title font: {title_font_id} -> {title_font_path}")
         logger.info(f"[{run_id}] Subtitle font: {subtitle_font_id} -> {subtitle_font_path}")
@@ -241,6 +246,84 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         height = 1920
         fps = layout.get("timeline", {}).get("fps", 30)
 
+        # Pre-generate title block clips if needed (to be reused across all scenes)
+        title_clips_cache = {}  # {duration_sec: (title_bg_clip, title_clip, title_height)}
+        title_text = layout.get("title", "")
+
+        # Log title block configuration at start
+        logger.info(f"[{run_id}] === TITLE BLOCK CONFIGURATION ===")
+        logger.info(f"[{run_id}] title_text: '{title_text}'")
+        logger.info(f"[{run_id}] use_title_block: {use_title_block}")
+        logger.info(f"[{run_id}] title_bg_color: {title_bg_color}")
+        logger.info(f"[{run_id}] title_font: {title_font_id} -> {title_font_path}")
+        logger.info(f"[{run_id}] title_font_size: {title_font_size}")
+        logger.info(f"[{run_id}] =====================================")
+
+        # Function to create title block clips for a given duration
+        def create_title_block_clips(duration_sec):
+            if duration_sec in title_clips_cache:
+                return title_clips_cache[duration_sec]
+
+            try:
+                # Convert hex color to RGB
+                def hex_to_rgb(hex_color):
+                    hex_color = hex_color.lstrip('#')
+                    return [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
+
+                title_rgb = hex_to_rgb(title_bg_color)
+
+                # Create title text (bold and large) with max width to prevent overflow
+                max_title_width = int(width * 0.95)  # 95% of width for more space
+
+                # CRITICAL FIX: Give TextClip MUCH MORE HEIGHT than it thinks it needs
+                # MoviePy's auto-calculated height is ALWAYS too small for Korean text with strokes
+                # We need to manually specify a generous height to prevent clipping
+                estimated_text_height = int(title_font_size * 3.5)  # 3.5x font size for generous space
+
+                # NOTE: TextClip with method='caption' supports \n for line breaks
+                # This is the correct way to handle multi-line titles
+                # MoviePy 2.x doesn't support 'align' parameter - text alignment is handled by positioning
+                title_clip = TextClip(
+                    text=title_text,
+                    font=title_font_path,  # Use selected font
+                    font_size=title_font_size,
+                    color='white',
+                    stroke_color='black',
+                    stroke_width=3,
+                    size=(max_title_width, estimated_text_height),  # EXPLICIT HEIGHT to prevent clipping
+                    method='caption',  # Enable text wrapping and multi-line support
+                    duration=duration_sec
+                )
+
+                # Calculate title block height - use the explicit height we set
+                # Add minimal padding since we already gave generous height to TextClip
+                padding_top = 20  # Small top padding
+                padding_bottom = 20  # Small bottom padding
+                padding_left = 30  # Left padding for title
+
+                title_height = estimated_text_height + padding_top + padding_bottom
+
+                logger.info(f"[{run_id}] Created title block: text_height={estimated_text_height}px, total_height={title_height}px, duration={duration_sec}s")
+
+                # Create background rectangle for title (auto-sized)
+                def make_title_bg(t):
+                    bg = np.full((title_height, width, 3), title_rgb, dtype=np.uint8)
+                    return bg
+
+                title_bg_clip = VideoClip(make_title_bg, duration=duration_sec)
+                title_bg_clip = title_bg_clip.with_position((0, 0))
+
+                # Position title text LEFT-ALIGNED with padding
+                title_clip = title_clip.with_position((padding_left, padding_top))
+
+                # Cache the result
+                title_clips_cache[duration_sec] = (title_bg_clip, title_clip, title_height)
+
+                return (title_bg_clip, title_clip, title_height)
+            except Exception as e:
+                logger.error(f"[{run_id}] Failed to create title block: {e}", exc_info=True)
+                return (None, None, 0)
+
         scenes_clips = []
 
         # Process each scene
@@ -265,6 +348,10 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
             # Layer images
             image_clips = [base_clip]
+
+            # Initialize scene_image_top_y for subtitle positioning
+            # Default to None, will be set for general mode 1:1 images
+            scene_image_top_y = None
 
             # Sort slots by z_index (background first, then characters)
             sorted_slots = sorted(scene.get("images", []), key=lambda s: s.get("z_index", 1))
@@ -321,17 +408,17 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                         aspect_ratio = img_slot.get("aspect_ratio", "9:16")
 
                         if aspect_ratio == "1:1":
-                            # General Mode: 1:1 square image, positioned to match preview
+                            # General Mode: 1:1 square image, positioned near bottom
                             # Resize to fit width while maintaining aspect ratio
                             img_clip = img_clip.resized(width=width)
-                            # Position image center at 60% of screen height (matching preview)
+                            # Position image center at 80% of screen height (near bottom to avoid subtitle overlap)
                             img_height = img_clip.h
-                            # Calculate y so image center is at 60% of screen height
-                            y_position = int(height * 0.6 - img_height * 0.6)
+                            # Calculate y so image center is at 80% of screen height
+                            y_position = int(height * 0.80 - img_height * 0.80)
                             img_clip = img_clip.with_position(("center", y_position))
                             # Store image position for subtitle placement
                             scene_image_top_y = y_position
-                            logger.info(f"[{run_id}] Added 1:1 scene image (positioned at y={y_position}px, image center at 60% of screen)")
+                            logger.info(f"[{run_id}] Added 1:1 scene image (positioned at y={y_position}px, image center at 80% of screen, avoiding subtitle overlap)")
                         else:
                             # Story Mode or default: 9:16 image, fill screen
                             img_clip = img_clip.resized((width, height))
@@ -339,23 +426,24 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
                             logger.info(f"[{run_id}] Added 9:16 scene image (full screen)")
                     else:
                         # Character: resize and position based on x_pos
-                        img_clip = img_clip.resized(height=height * 0.6)
+                        # Use 0.7 (70% of screen height) to show full character even if text overlaps
+                        img_clip = img_clip.resized(height=height * 0.7)
 
                         # Check for x_pos (Story Mode positioning)
                         if "x_pos" in img_slot:
                             x_pos = img_slot["x_pos"]  # 0.25 (left), 0.5 (center), 0.75 (right)
 
-                            # Position image center at x_pos (not left edge)
+                            # Position image horizontally at x_pos, bottom-aligned vertically
                             img_width, img_height = img_clip.size
                             x_center = int(x_pos * width)
-                            y_center = int(height * 0.5)
+                            y_bottom = height  # Bottom of screen
 
-                            # Calculate top-left corner position so center is at (x_center, y_center)
+                            # Calculate top-left corner position so horizontal center is at x_center and bottom is at screen bottom
                             x_pixel = x_center - (img_width // 2)
-                            y_pixel = y_center - (img_height // 2)
+                            y_pixel = y_bottom - img_height
 
                             img_clip = img_clip.with_position((x_pixel, y_pixel), relative=False)
-                            logger.info(f"[{run_id}] Positioned character center at x={x_pos:.2f} ({x_center}px, image at {x_pixel}px)")
+                            logger.info(f"[{run_id}] Positioned character at x={x_pos:.2f} ({x_center}px), bottom-aligned (image at {x_pixel}, {y_pixel}px)")
                         else:
                             # Legacy positioning by slot_id
                             slot_id = img_slot.get("slot_id", "center")
@@ -371,66 +459,23 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
             # Composite video (without text yet)
             video_clip = CompositeVideoClip(image_clips, size=(width, height))
 
-            # Add title block at the top (auto-adjusting height)
-            title_text = layout.get("title", "")
+            # Add title block at the top if enabled
             title_height = 0  # Track title block height for subtitle positioning
-            if title_text:
-                try:
-                    # Convert hex color to RGB
-                    def hex_to_rgb(hex_color):
-                        hex_color = hex_color.lstrip('#')
-                        return [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
 
-                    title_rgb = hex_to_rgb(title_bg_color)
+            if title_text and use_title_block:
+                # Create or retrieve cached title block clips
+                title_bg_clip, title_clip_positioned, title_height = create_title_block_clips(duration_sec)
 
-                    # Create title text (bold and large) with max width to prevent overflow
-                    max_title_width = int(width * 0.95)  # 95% of width for more space
-
-                    # CRITICAL FIX: Give TextClip MUCH MORE HEIGHT than it thinks it needs
-                    # MoviePy's auto-calculated height is ALWAYS too small for Korean text with strokes
-                    # We need to manually specify a generous height to prevent clipping
-                    estimated_text_height = int(title_font_size * 3.5)  # 3.5x font size for generous space
-
-                    # NOTE: TextClip with method='caption' supports \n for line breaks
-                    # This is the correct way to handle multi-line titles
-                    title_clip = TextClip(
-                        text=title_text,
-                        font=title_font_path,  # Use selected font
-                        font_size=title_font_size,
-                        color='white',
-                        stroke_color='black',
-                        stroke_width=3,
-                        size=(max_title_width, estimated_text_height),  # EXPLICIT HEIGHT to prevent clipping
-                        method='caption',  # Enable text wrapping and multi-line support
-                        duration=duration_sec
-                    )
-
-                    # Calculate title block height - use the explicit height we set
-                    # Add minimal padding since we already gave generous height to TextClip
-                    padding_top = 20  # Small top padding
-                    padding_bottom = 20  # Small bottom padding
-
-                    title_height = estimated_text_height + padding_top + padding_bottom
-
-                    logger.info(f"[{run_id}] Title text height: {estimated_text_height}px, total block height: {title_height}px")
-
-                    # Create background rectangle for title (auto-sized)
-                    def make_title_bg(t):
-                        bg = np.full((title_height, width, 3), title_rgb, dtype=np.uint8)
-                        return bg
-
-                    title_bg_clip = VideoClip(make_title_bg, duration=duration_sec)
-                    title_bg_clip = title_bg_clip.with_position((0, 0))
-
-                    # Position title text centered horizontally
-                    title_clip = title_clip.with_position(('center', padding_top))
-
+                if title_bg_clip and title_clip_positioned:
                     # Add title block and text to the scene
-                    video_clip = CompositeVideoClip([video_clip, title_bg_clip, title_clip], size=(width, height))
-                    logger.info(f"[{run_id}] Added title block: {title_text} (color: {title_bg_color}, height: {title_height}px, size: {title_font_size}px)")
-                except Exception as e:
-                    logger.warning(f"[{run_id}] Failed to create title block: {e}")
-                    title_height = 0  # Reset on error
+                    video_clip = CompositeVideoClip([video_clip, title_bg_clip, title_clip_positioned], size=(width, height))
+                    logger.info(f"[{run_id}] Scene {scene_id}: Added title block (height: {title_height}px)")
+                else:
+                    logger.error(f"[{run_id}] Scene {scene_id}: Failed to add title block (clips are None)")
+            elif title_text and not use_title_block:
+                logger.info(f"[{run_id}] Scene {scene_id}: Title block disabled by user (use_title_block=False)")
+            elif not title_text:
+                logger.warning(f"[{run_id}] Scene {scene_id}: No title text found, skipping title block")
 
             # Add text overlays (subtitles) - positioned between title and content
             text_clips = []
@@ -470,8 +515,13 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
 
                     # Center subtitle between title block and image
                     # Calculate available space and center the subtitle in it
-                    available_space = scene_image_top_y - title_height
-                    subtitle_y = title_height + (available_space - estimated_subtitle_height) / 2
+                    if scene_image_top_y is not None:
+                        # General mode: center between title and image
+                        available_space = scene_image_top_y - title_height
+                        subtitle_y = title_height + (available_space - estimated_subtitle_height) / 2
+                    else:
+                        # Story mode: position subtitle below title block (or at top if no title)
+                        subtitle_y = title_height + 20  # 20px padding from title (or from top if no title)
 
                     txt_position = ('center', subtitle_y)
                     txt_clip = txt_clip.with_position(txt_position)
