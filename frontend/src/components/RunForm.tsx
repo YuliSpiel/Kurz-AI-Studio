@@ -112,9 +112,10 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       const result = await enhancePrompt(prompt, mode)
       setEnhancementResult(result)
       setShowEnhancementPreview(true)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to enhance prompt:', error)
-      alert('프롬프트 풍부화 실패: ' + error)
+      const errorMessage = error?.message || String(error)
+      alert(`프롬프트 풍부화 실패:\n${errorMessage}\n\n백엔드 서버가 실행 중인지 확인해주세요.`)
     } finally {
       setIsEnhancing(false)
     }
