@@ -6,6 +6,7 @@ import logging
 import json
 from pathlib import Path
 from celery import chord, group
+from celery.exceptions import Retry
 from typing import List
 
 from app.celery_app import celery
@@ -17,14 +18,15 @@ from app.utils.progress import publish_progress
 logger = logging.getLogger(__name__)
 
 
-def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Path, spec: dict) -> List[str]:
+def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Path, characters_path: Path, spec: dict) -> List[str]:
     """
-    Validate plot.json and layout.json structure.
+    Validate plot.json, characters.json, and layout.json structure.
 
     Args:
         run_id: Run identifier
         plot_json_path: Path to plot.json
         layout_json_path: Path to layout.json
+        characters_path: Path to characters.json
         spec: RunSpec dict
 
     Returns:
@@ -41,6 +43,12 @@ def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Pat
         with open(layout_json_path, "r", encoding="utf-8") as f:
             layout_data = json.load(f)
 
+        # Load characters.json
+        characters_data = {}
+        if characters_path.exists():
+            with open(characters_path, "r", encoding="utf-8") as f:
+                characters_data = json.load(f)
+
         mode = spec.get("mode", "general")
         num_cuts = spec.get("num_cuts", 3)
 
@@ -49,10 +57,26 @@ def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Pat
             errors.append("plot.json에 scenes가 없거나 비어있음")
             return errors  # Critical error, stop validation
 
-        # Validation 2: Check scene count matches num_cuts
-        scene_count = len(plot_data["scenes"])
-        if scene_count != num_cuts:
-            errors.append(f"scenes 개수({scene_count})가 요청한 컷 수({num_cuts})와 불일치")
+        # Validation 2: Count total images requested across all scenes
+        total_images = 0
+        for scene in plot_data["scenes"]:
+            # In general/ad mode: count non-empty image_prompt (empty string means reuse)
+            # In story mode: 1 background + N characters per scene
+            if mode in ["general", "ad"]:
+                # Only count scenes that request a new image (non-empty image_prompt)
+                if "image_prompt" in scene and scene["image_prompt"] and scene["image_prompt"].strip():
+                    total_images += 1
+            elif mode == "story":
+                # Background + characters
+                if "background_img" in scene and scene["background_img"]:
+                    total_images += 1
+                # Count character slots
+                for key in scene.keys():
+                    if key.startswith("char") and key.endswith("_id") and scene[key]:
+                        total_images += 1
+
+        if total_images != num_cuts:
+            errors.append(f"새 이미지 요청 개수({total_images})가 num_cuts({num_cuts})와 불일치")
 
         # Validation 3: Check each scene has required fields
         for idx, scene in enumerate(plot_data["scenes"]):
@@ -83,15 +107,70 @@ def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Pat
         if "timeline" not in layout_data:
             errors.append("layout.json에 timeline 필드 없음")
 
-        # Validation 5: Check layout scenes match plot scenes count
-        if "scenes" in layout_data and len(layout_data["scenes"]) != scene_count:
-            errors.append(f"layout.json scenes 개수({len(layout_data['scenes'])})가 plot.json과 불일치")
+        # Validation 5: Check layout has correct number of image slots
+        layout_image_count = 0
+        for scene in layout_data.get("scenes", []):
+            layout_image_count += len(scene.get("images", []))
+
+        if layout_image_count != num_cuts:
+            errors.append(f"layout.json 이미지 슬롯 개수({layout_image_count})가 num_cuts({num_cuts})와 불일치")
 
         # Validation 6: Check each layout scene has images
         for idx, scene in enumerate(layout_data.get("scenes", [])):
             scene_id = scene.get("scene_id", f"scene_{idx}")
             if "images" not in scene or not scene["images"]:
                 errors.append(f"{scene_id}: layout.json에 images 슬롯이 없음")
+
+        # Validation 7: Check text quality (detect fallback/dummy data)
+        prompt = spec.get("prompt", "")
+        all_texts = [scene.get("text", "") for scene in plot_data["scenes"]]
+
+        # Check for fallback pattern: "{prompt}의 N번째 장면입니다"
+        fallback_pattern_count = 0
+        for text in all_texts:
+            if "번째 장면입니다" in text or f"{prompt}의" in text or f'"{prompt}의' in text:
+                fallback_pattern_count += 1
+
+        if fallback_pattern_count > 0:
+            errors.append(f"폴백 더미 텍스트 감지됨 ({fallback_pattern_count}개 씬) - LLM 생성 실패")
+
+        # Check for identical texts (all scenes have same text = LLM failure)
+        if len(all_texts) > 1:
+            unique_texts = set(all_texts)
+            if len(unique_texts) == 1:
+                errors.append(f"모든 씬({len(all_texts)}개)이 동일한 텍스트 반복 - LLM 생성 실패")
+            elif len(unique_texts) < len(all_texts) * 0.5:  # More than 50% duplicates
+                errors.append(f"과도한 텍스트 중복 ({len(unique_texts)}/{len(all_texts)} 고유) - LLM 생성 실패")
+
+        # Check text length (max 28 characters per spec)
+        for idx, scene in enumerate(plot_data["scenes"]):
+            scene_id = scene.get("scene_id", f"scene_{idx}")
+            text = scene.get("text", "").strip()
+            # Remove quotes if present
+            text_clean = text.strip('"\'')
+            if len(text_clean) > 50:  # Allow some flexibility, but 50 is too long
+                errors.append(f"{scene_id}: text 길이 초과 ({len(text_clean)}자, 권장 28자 이내)")
+
+        # Validation 8: Check for dummy character names in characters.json
+        if characters_data and "characters" in characters_data:
+            char_names = [c.get("name", "") for c in characters_data["characters"]]
+            dummy_char_count = 0
+            for name in char_names:
+                if name.startswith("캐릭터 ") or name.startswith("Character "):
+                    dummy_char_count += 1
+
+            if dummy_char_count > 0:
+                errors.append(f"의미 없는 캐릭터 이름 감지됨 ({dummy_char_count}개) - LLM 생성 실패")
+
+            # Check for dummy appearance descriptions
+            char_appearances = [c.get("appearance", "") for c in characters_data["characters"] if c.get("appearance")]
+            dummy_appearance_count = 0
+            for appearance in char_appearances:
+                if appearance.startswith("캐릭터 ") and "의 외형" in appearance:
+                    dummy_appearance_count += 1
+
+            if dummy_appearance_count > 0:
+                errors.append(f"의미 없는 캐릭터 외형 감지됨 ({dummy_appearance_count}개) - LLM 생성 실패")
 
         logger.info(f"[{run_id}] Validation completed: {len(errors)} errors found")
         return errors
@@ -161,16 +240,44 @@ def plan_task(self, run_id: str, spec: dict):
         logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
         publish_progress(run_id, progress=0.2, log=f"기획자: 레이아웃 JSON 생성 완료")
 
-        # Step 2.5: Validate plot.json and layout.json
-        logger.info(f"[{run_id}] Validating plot and layout JSON...")
+        # Step 2.5: Validate plot.json, characters.json, and layout.json
+        logger.info(f"[{run_id}] Validating plot, characters, and layout JSON...")
         publish_progress(run_id, progress=0.21, log="기획자: JSON 검증 중...")
-        validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, spec)
+        validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, characters_path, spec)
 
         if validation_errors:
-            error_msg = f"Plot validation failed: {', '.join(validation_errors)}"
-            logger.error(f"[{run_id}] {error_msg}")
-            publish_progress(run_id, progress=0.21, log=f"❌ JSON 검증 실패: {validation_errors[0]}")
-            raise ValueError(error_msg)
+            # Check retry count
+            from app.main import runs
+            max_retries = 2
+            retry_count = runs.get(run_id, {}).get("artifacts", {}).get("plot_retry_count", 0)
+
+            if retry_count < max_retries:
+                # Log retry attempt
+                logger.warning(f"[{run_id}] Plot validation failed (attempt {retry_count + 1}/{max_retries}), retrying...")
+                logger.warning(f"[{run_id}] Validation errors: {', '.join(validation_errors)}")
+                publish_progress(run_id, progress=0.21, log=f"⚠️ JSON 검증 실패 - 재생성 시도 ({retry_count + 1}/{max_retries})")
+
+                # Update retry counter
+                if run_id in runs:
+                    runs[run_id]["artifacts"]["plot_retry_count"] = retry_count + 1
+
+                # Clean up old files
+                plot_json_path.unlink(missing_ok=True)
+                json_path.unlink(missing_ok=True)
+                if characters_path:
+                    characters_path.unlink(missing_ok=True)
+
+                logger.info(f"[{run_id}] Cleaned up old files, retrying plot generation...")
+                publish_progress(run_id, progress=0.1, log="기획자: 시나리오 재작성 중...")
+
+                # Retry plot generation by raising Celery retry
+                raise self.retry(countdown=3, max_retries=max_retries)
+            else:
+                # Max retries exceeded
+                error_msg = f"Plot validation failed after {max_retries} attempts: {', '.join(validation_errors)}"
+                logger.error(f"[{run_id}] {error_msg}")
+                publish_progress(run_id, progress=0.21, log=f"❌ 최대 재시도 초과 - 생성 실패")
+                raise ValueError(error_msg)
 
         logger.info(f"[{run_id}] ✓ JSON validation passed")
         publish_progress(run_id, progress=0.22, log="✓ JSON 검증 완료")
@@ -220,6 +327,11 @@ def plan_task(self, run_id: str, spec: dict):
             "json_path": str(json_path),
             "status": "success"
         }
+
+    except Retry:
+        # Let Celery handle retry - don't mark as failed
+        logger.info(f"[{run_id}] Plot task retrying due to validation failure...")
+        raise
 
     except Exception as e:
         logger.error(f"[{run_id}] Plan task failed: {e}", exc_info=True)

@@ -78,6 +78,9 @@ htmlcov/
 # Test outputs
 backend/app/data/tts_test/
 
+# Resources (temporary files, test assets)
+Resources/
+
 # Celery
 celerybeat-schedule
 celerybeat.pid

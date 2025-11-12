@@ -38,14 +38,17 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
 {{
   "enhanced_prompt": "detailed Korean description",
   "suggested_title": "catchy video title (max 30 chars)",
+  "suggested_plot_outline": "brief 3-5 sentence plot summary in Korean (what scenes will appear, what characters will do)",
   "suggested_num_cuts": 1-10,
   "suggested_art_style": "style name",
   "suggested_music_genre": "genre",
-  "suggested_num_characters": 1-2,
+  "suggested_num_characters": 1-3,
   "suggested_narrative_tone": "one of: 격식형, 서술형, 친근한반말, 진지한나레이션, 감정강조, 코믹풍자",
   "suggested_plot_structure": "one of: 기승전결, 고구마사이다, 3막구조, 비교형, 반전형, 정보나열, 감정곡선, 질문형, 루프형",
   "reasoning": "brief Korean explanation (max 2 sentences)"
-}}"""
+}}
+
+IMPORTANT: suggested_num_characters should match the plot_outline (if dialogue between 2 people → 2, if solo narration → 1, if 3-way conversation → 3)."""
 
     user_prompt = f"Prompt: {original_prompt}\nMode: {mode}"
 
@@ -85,6 +88,7 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
         required_fields = [
             "enhanced_prompt",
             "suggested_title",
+            "suggested_plot_outline",
             "suggested_num_cuts",
             "suggested_art_style",
             "suggested_music_genre",
@@ -100,7 +104,7 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
 
         # Validate ranges
         result["suggested_num_cuts"] = max(1, min(10, int(result["suggested_num_cuts"])))
-        result["suggested_num_characters"] = max(1, min(2, int(result["suggested_num_characters"])))
+        result["suggested_num_characters"] = max(1, min(3, int(result["suggested_num_characters"])))
 
         logger.info(f"[ENHANCE] Successfully enhanced prompt")
         logger.info(f"[ENHANCE] Suggested title: '{result['suggested_title']}', "

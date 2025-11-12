@@ -9,6 +9,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const mode = 'general' // Fixed to general mode
   const [prompt, setPrompt] = useState('')
   const [numCuts, setNumCuts] = useState(3)
+  const [numCharacters, setNumCharacters] = useState<1 | 2 | 3>(1)
   const [artStyle, setArtStyle] = useState('파스텔 수채화')
   const [musicGenre, setMusicGenre] = useState('ambient')
   const [narrativeTone, setNarrativeTone] = useState('격식형')
@@ -102,7 +103,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       const result = await createRun({
         mode,
         prompt: `${prompt}\n\n[스타일 지시: 말투="${narrativeTone}", 전개구조="${plotStructure}"]`,
-        num_characters: 1, // Fixed to 1 character for general mode
+        num_characters: numCharacters,
         num_cuts: numCuts,
         art_style: artStyle,
         music_genre: musicGenre,
@@ -162,11 +163,11 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
     setPrompt(enhancementResult.enhanced_prompt)
     setVideoTitle(enhancementResult.suggested_title)
     setNumCuts(enhancementResult.suggested_num_cuts)
+    setNumCharacters(enhancementResult.suggested_num_characters as 1 | 2 | 3)
     setArtStyle(enhancementResult.suggested_art_style)
     setMusicGenre(enhancementResult.suggested_music_genre)
     setNarrativeTone(enhancementResult.suggested_narrative_tone)
     setPlotStructure(enhancementResult.suggested_plot_structure)
-    // Note: num_characters is ignored, always fixed to 1 for general mode
     setShowEnhancementPreview(false)
     setEnhancementResult(null)
   }
@@ -567,6 +568,24 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
 
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>
+                📖 예상 플롯
+              </label>
+              <div style={{
+                padding: '14px',
+                backgroundColor: '#F0FDF4',
+                borderLeft: '4px solid #10B981',
+                borderRadius: '8px',
+                fontSize: '14px',
+                lineHeight: '1.8',
+                color: '#065F46',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {enhancementResult.suggested_plot_outline}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>
                 풍부화된 프롬프트
               </label>
               <div style={{
@@ -581,13 +600,22 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
               <div>
                 <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
                   컷 수
                 </label>
                 <div style={{ fontSize: '18px', fontWeight: '600', color: '#7C3AED' }}>
                   {enhancementResult.suggested_num_cuts}개
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
+                  캐릭터 수
+                </label>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: '#10B981' }}>
+                  {enhancementResult.suggested_num_characters}명
                 </div>
               </div>
 

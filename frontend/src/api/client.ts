@@ -103,6 +103,7 @@ export async function getAvailableFonts(): Promise<Font[]> {
 export interface PromptEnhancementResult {
   enhanced_prompt: string
   suggested_title: string
+  suggested_plot_outline: string
   suggested_num_cuts: number
   suggested_art_style: string
   suggested_music_genre: string

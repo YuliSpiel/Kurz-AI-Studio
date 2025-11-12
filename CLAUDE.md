@@ -411,6 +411,49 @@ celery -A app.celery_app worker --loglevel=info --pool=gevent --concurrency=10
 
 ---
 
+### ⚠️ Celery Retry Exception Handling (CRITICAL)
+
+**CRITICAL**: Celery의 `self.retry()` 메커니즘은 `celery.exceptions.Retry` 예외를 발생시켜 작동합니다. 이 예외는 **반드시 전파되어야 하며, 일반 예외 핸들러에서 잡아서는 안됩니다**.
+
+#### 문제가 되는 패턴 (잘못된 예)
+```python
+try:
+    # Some validation logic
+    if validation_failed:
+        raise self.retry(countdown=3, max_retries=2)
+except Exception as e:  # ❌ 이렇게 하면 Retry도 잡힙니다!
+    logger.error(f"Task failed: {e}")
+    fsm.fail(str(e))  # FSM이 FAILED로 전환되어 재시도 안됨
+    raise
+```
+
+#### 올바른 패턴
+```python
+from celery.exceptions import Retry
+
+try:
+    # Some validation logic
+    if validation_failed:
+        raise self.retry(countdown=3, max_retries=2)
+except Retry:  # ✅ Retry 예외를 먼저 잡아서 재전파
+    logger.info(f"Task retrying...")
+    raise  # FSM 상태 변경 없이 Celery가 재시도 처리
+except Exception as e:  # 다른 예외만 에러 처리
+    logger.error(f"Task failed: {e}")
+    fsm.fail(str(e))
+    raise
+```
+
+#### 왜 중요한가?
+- `Retry` 예외가 일반 `Exception` 핸들러에 잡히면 FSM이 FAILED로 전환됨
+- 재시도 메커니즘이 작동하지 않고 작업이 실패로 처리됨
+- 로그에 "Retry in Xs" 메시지와 함께 "Task failed" 에러가 함께 보임
+
+#### 적용된 파일
+- [backend/app/tasks/plan.py](backend/app/tasks/plan.py) (lines 273-276, 278-291)
+
+---
+
 ## 📚 문서화
 
 ### API 문서
