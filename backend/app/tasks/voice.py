@@ -28,6 +28,12 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
     logger.info(f"[{run_id}] Voice: Starting TTS generation...")
     publish_progress(run_id, progress=0.55, log="성우: 음성 합성 시작...")
 
+    # Check stub mode
+    stub_mode = spec.get("stub_tts_mode", False)
+    if stub_mode:
+        logger.warning(f"[{run_id}] 🧪 STUB TTS MODE: Skipping ElevenLabs/PlayHT API calls")
+        publish_progress(run_id, progress=0.57, log="🧪 테스트: 더미 음성 사용 (API 생략)")
+
     # TEST: 3초 대기
     import time
     time.sleep(3)
@@ -37,8 +43,13 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
-        # Get TTS provider
-        if settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
+        # Get TTS provider (stub mode bypasses all providers)
+        if stub_mode:
+            # Use stub client in test mode
+            from app.providers.tts.stub_client import StubTTSClient
+            client = StubTTSClient()
+            logger.info(f"[{run_id}] Using Stub TTS client (test mode)")
+        elif settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
             from app.providers.tts.elevenlabs_client import ElevenLabsClient
             client = ElevenLabsClient(api_key=settings.ELEVENLABS_API_KEY)
         elif settings.TTS_PROVIDER == "playht" and settings.PLAYHT_API_KEY:

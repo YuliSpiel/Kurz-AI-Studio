@@ -85,6 +85,22 @@ class RunSpec(BaseModel):
         description="레이아웃 커스터마이징 설정 (title_bg_color, title_font, title_font_size, subtitle_font, subtitle_font_size)"
     )
 
+    # Test mode flags
+    stub_image_mode: bool = Field(
+        default=False,
+        description="테스트 모드: 이미지 생성 API 호출 생략 (더미 이미지 사용)"
+    )
+
+    stub_music_mode: bool = Field(
+        default=False,
+        description="테스트 모드: 음악 생성 API 호출 생략 (더미 음원 사용)"
+    )
+
+    stub_tts_mode: bool = Field(
+        default=False,
+        description="테스트 모드: TTS API 호출 생략 (더미 음성 사용)"
+    )
+
 
 class RunStatus(BaseModel):
     """Run status and progress information."""

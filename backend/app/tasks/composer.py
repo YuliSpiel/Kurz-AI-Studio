@@ -28,6 +28,12 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
     logger.info(f"[{run_id}] Composer: Starting music generation...")
     publish_progress(run_id, progress=0.45, log="작곡가: 배경음악 생성 시작...")
 
+    # Check stub mode
+    stub_mode = spec.get("stub_music_mode", False)
+    if stub_mode:
+        logger.warning(f"[{run_id}] 🧪 STUB MUSIC MODE: Skipping ElevenLabs/Mubert API calls")
+        publish_progress(run_id, progress=0.47, log="🧪 테스트: 더미 음원 사용 (API 생략)")
+
     # TEST: 3초 대기
     import time
     time.sleep(3)
@@ -37,8 +43,13 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
         with open(json_path, "r", encoding="utf-8") as f:
             layout = json.load(f)
 
-        # Get music provider (ElevenLabs 우선, Mubert는 폴백)
-        if settings.ELEVENLABS_API_KEY:
+        # Get music provider (stub mode bypasses all providers)
+        if stub_mode:
+            # Use stub client in test mode
+            from app.providers.music.stub_client import StubMusicClient
+            client = StubMusicClient()
+            logger.info(f"[{run_id}] Using Stub client (test mode)")
+        elif settings.ELEVENLABS_API_KEY:
             # ElevenLabs Sound Effects로 BGM 생성 (저렴하고 TTS와 통합)
             from app.providers.music.elevenlabs_music_client import ElevenLabsMusicClient
             client = ElevenLabsMusicClient(api_key=settings.ELEVENLABS_API_KEY)

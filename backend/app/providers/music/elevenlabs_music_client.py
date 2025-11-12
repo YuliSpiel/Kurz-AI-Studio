@@ -125,7 +125,8 @@ class ElevenLabsMusicClient(MusicProvider):
         mood_desc = mood_map.get(mood.lower(), mood)
 
         # ElevenLabs Sound Effects는 자연어 프롬프트 사용
-        prompt = f"{mood_desc} {genre_desc}, instrumental, no vocals, looping"
+        # "seamless loop" 키워드로 시작/끝이 자연스럽게 이어지는 음원 생성 시도
+        prompt = f"{mood_desc} {genre_desc}, instrumental, no vocals, seamless loop, loopable"
 
         return prompt
 

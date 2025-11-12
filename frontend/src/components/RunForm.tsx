@@ -11,6 +11,8 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const [numCuts, setNumCuts] = useState(3)
   const [artStyle, setArtStyle] = useState('파스텔 수채화')
   const [musicGenre, setMusicGenre] = useState('ambient')
+  const [narrativeTone, setNarrativeTone] = useState('격식형')
+  const [plotStructure, setPlotStructure] = useState('기승전결')
   const [referenceFiles, setReferenceFiles] = useState<File[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isEnhancing, setIsEnhancing] = useState(false)
@@ -25,11 +27,29 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const [subtitleFont, setSubtitleFont] = useState('AppleGothic')
   const [subtitleFontSize, setSubtitleFontSize] = useState(80)
 
+  // Test mode states (Option+Shift+T)
+  const [showTestMode, setShowTestMode] = useState(false)
+  const [stubImageMode, setStubImageMode] = useState(false)
+  const [stubMusicMode, setStubMusicMode] = useState(false)
+  const [stubTTSMode, setStubTTSMode] = useState(false)
+
   // Font list with fallback defaults
   const [availableFonts, setAvailableFonts] = useState<Font[]>([
     { id: 'AppleGothic', name: 'Apple Gothic (시스템)', path: 'AppleGothic' },
     { id: 'AppleMyungjo', name: 'Apple Myungjo (시스템)', path: 'AppleMyungjo' }
   ])
+
+  // Keyboard shortcut for test mode (Option+Shift+T)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault()
+        setShowTestMode(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Load available fonts on component mount
   useEffect(() => {
@@ -78,10 +98,10 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
         referenceImages.push(filename)
       }
 
-      // Create run with layout customization
+      // Create run with layout customization and test mode flags
       const result = await createRun({
         mode,
-        prompt,
+        prompt: `${prompt}\n\n[스타일 지시: 말투="${narrativeTone}", 전개구조="${plotStructure}"]`,
         num_characters: 1, // Fixed to 1 character for general mode
         num_cuts: numCuts,
         art_style: artStyle,
@@ -95,6 +115,10 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           subtitle_font: subtitleFont,
           subtitle_font_size: subtitleFontSize,
         },
+        // Test mode flags
+        stub_image_mode: stubImageMode,
+        stub_music_mode: stubMusicMode,
+        stub_tts_mode: stubTTSMode,
       })
 
       onRunCreated(result.run_id)
@@ -140,6 +164,8 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
     setNumCuts(enhancementResult.suggested_num_cuts)
     setArtStyle(enhancementResult.suggested_art_style)
     setMusicGenre(enhancementResult.suggested_music_genre)
+    setNarrativeTone(enhancementResult.suggested_narrative_tone)
+    setPlotStructure(enhancementResult.suggested_plot_structure)
     // Note: num_characters is ignored, always fixed to 1 for general mode
     setShowEnhancementPreview(false)
     setEnhancementResult(null)
@@ -223,6 +249,39 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       </div>
 
       <div className="form-group">
+        <label>내레이션 말투</label>
+        <select
+          value={narrativeTone}
+          onChange={(e) => setNarrativeTone(e.target.value)}
+        >
+          <option value="격식형">격식형 (-입니다체) - 뉴스, 해설, 교육</option>
+          <option value="서술형">서술형 (-함.체) - 요약, 정보전달</option>
+          <option value="친근한반말">친근한 반말 (-거야, -지?) - 광고, 추천</option>
+          <option value="진지한나레이션">진지한 나레이션체 - 스토리, 다큐</option>
+          <option value="감정강조">감정 강조형 - 리액션, 감정 몰입</option>
+          <option value="코믹풍자">코믹/풍자형 - 병맛, 밈 기반</option>
+        </select>
+      </div>
+
+      <div className="form-group">
+        <label>전개 구조</label>
+        <select
+          value={plotStructure}
+          onChange={(e) => setPlotStructure(e.target.value)}
+        >
+          <option value="기승전결">고전적 기승전결 - 스토리텔링, 교육</option>
+          <option value="고구마사이다">고구마-사이다형 - 답답함→반전 해결</option>
+          <option value="3막구조">3막 구조 (시작-위기-해결) - 간결한 내러티브</option>
+          <option value="비교형">비교형 (Before-After) - 변화 강조</option>
+          <option value="반전형">반전형 (Twist Ending) - 밈, 코믹, 리액션</option>
+          <option value="정보나열">정보 나열형 (Listicle) - 트렌드 요약</option>
+          <option value="감정곡선">감정 곡선형 - 공감→위로→희망</option>
+          <option value="질문형">질문형 오프닝 - 호기심 유발</option>
+          <option value="루프형">루프형 (Looped Ending) - 반복 시청 유도</option>
+        </select>
+      </div>
+
+      <div className="form-group">
         <label>참조 이미지 (선택)</label>
         <input
           type="file"
@@ -234,6 +293,65 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           <p className="file-count">{referenceFiles.length}개 파일 선택됨</p>
         )}
       </div>
+
+      {/* Test Mode Panel (Option+Shift+T) */}
+      {showTestMode && (
+        <div style={{
+          marginTop: '20px',
+          padding: '15px',
+          backgroundColor: '#FFF3CD',
+          border: '2px solid #FFC107',
+          borderRadius: '8px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            marginBottom: '10px',
+            fontWeight: 'bold',
+            color: '#856404'
+          }}>
+            <span style={{ fontSize: '18px', marginRight: '8px' }}>🧪</span>
+            테스트 모드 (API 호출 생략)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubImageMode}
+                onChange={(e) => setStubImageMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub 이미지 모드 (Gemini 이미지 생성 생략)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubMusicMode}
+                onChange={(e) => setStubMusicMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub 음원 모드 (ElevenLabs 음악 생성 생략)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubTTSMode}
+                onChange={(e) => setStubTTSMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub TTS 모드 (ElevenLabs 음성 합성 생략)</span>
+            </label>
+          </div>
+          <p style={{
+            marginTop: '10px',
+            fontSize: '12px',
+            color: '#856404',
+            fontStyle: 'italic'
+          }}>
+            💡 Option+Shift+T를 다시 누르면 테스트 모드가 숨겨집니다
+          </p>
+        </div>
+      )}
       </form>
 
       {/* Layout Customization Section */}
@@ -295,7 +413,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
                     textAlign: 'center',
                     width: '90%'
                   }}>
-                    "고구마가 세상에서 제일 맛있어!"
+                    카피바라와 친구들이 온천에서 힐링하고있어요!
                   </span>
                 </div>
                 {/* Background Image - 1:1, positioned at 60% from top (matching render) */}
@@ -306,7 +424,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
                   display: 'flex'
                 }}>
                   <img
-                    src="/outputs/20251107_1617_고구마를좋아하는/scene_1_scene.png"
+                    src="/outputs/20251111_1441_카피바라가온천을/scene_4_scene.png"
                     alt="Preview"
                     style={{
                       position: 'absolute',

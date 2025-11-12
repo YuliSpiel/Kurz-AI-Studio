@@ -12,6 +12,35 @@ from app.utils.progress import publish_progress
 logger = logging.getLogger(__name__)
 
 
+def _is_stub_image(image_path: Path) -> bool:
+    """
+    Check if image is a stub (1x1 pixel or very small).
+
+    Args:
+        image_path: Path to image file
+
+    Returns:
+        True if stub image, False otherwise
+    """
+    if not image_path or not Path(image_path).exists():
+        return True
+
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        width, height = img.size
+
+        # Stub images are 1x1 or very small (< 100x100)
+        if width < 100 or height < 100:
+            logger.warning(f"Detected stub image: {image_path} (size: {width}x{height})")
+            return True
+
+        return False
+    except Exception as e:
+        logger.error(f"Failed to check image size: {e}")
+        return True  # Treat as stub if we can't check
+
+
 @celery.task(bind=True, name="tasks.designer")
 def designer_task(self, run_id: str, json_path: str, spec: dict):
     """
@@ -27,6 +56,12 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
     """
     logger.info(f"[{run_id}] Designer: Starting image generation...")
     publish_progress(run_id, progress=0.3, log="디자이너: 이미지 생성 시작...")
+
+    # Check stub mode
+    stub_mode = spec.get("stub_image_mode", False)
+    if stub_mode:
+        logger.warning(f"[{run_id}] 🧪 STUB IMAGE MODE: Skipping Gemini API calls")
+        publish_progress(run_id, progress=0.32, log="🧪 테스트: 더미 이미지 사용 (API 생략)")
 
     # TEST: 3초 대기
     import time
@@ -169,16 +204,19 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
 
                     if img_type == "background":
                         # Background image: use prompt directly with art style
-                        prompt = f"{art_style}, {base_prompt}"
+                        # Add negative constraints to avoid text/speech bubbles
+                        prompt = f"{art_style}, {base_prompt}, no text, no speech bubbles, no Korean text, no letters, no words"
                         seed = scene.get("bg_seed", settings.BG_SEED_BASE)
                     elif img_type == "scene":
                         # General Mode: unified scene image (characters + background)
-                        prompt = f"{art_style}, {base_prompt}"
+                        # Add negative constraints to avoid text/speech bubbles
+                        prompt = f"{art_style}, {base_prompt}, no text, no speech bubbles, no Korean text, no letters, no words"
                         seed = scene.get("bg_seed", settings.BG_SEED_BASE)
                         logger.info(f"[{run_id}] General mode scene image: {prompt[:50]}...")
                     else:
                         # Character image (Story Mode): prompt already includes appearance + expression + pose
-                        prompt = f"{art_style}, {base_prompt}"
+                        # Add negative constraints to avoid text/speech bubbles
+                        prompt = f"{art_style}, {base_prompt}, no text, no speech bubbles, no Korean text, no letters, no words"
                         char_id = img_slot.get("ref_id")
                         char = next(
                             (c for c in layout.get("characters", []) if c["char_id"] == char_id),
@@ -232,25 +270,26 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                                     pose = scene_data.get("pose", "standing")
 
                             # Build prompt: art_style + appearance + expression + pose
+                            # Add negative constraints to avoid text/speech bubbles
                             if expression != "none" and pose != "none":
-                                prompt = f"{art_style}, {appearance}, {expression} expression, {pose} pose"
+                                prompt = f"{art_style}, {appearance}, {expression} expression, {pose} pose, no text, no speech bubbles, no Korean text, no letters, no words"
                             else:
-                                prompt = f"{art_style}, {appearance}"
+                                prompt = f"{art_style}, {appearance}, no text, no speech bubbles, no Korean text, no letters, no words"
 
                             seed = char.get("seed", settings.BASE_CHAR_SEED)
                         else:
-                            prompt = f"character, {spec.get('art_style', '')}"
+                            prompt = f"character, {spec.get('art_style', '')}, no text, no speech bubbles, no Korean text, no letters, no words"
                             seed = settings.BASE_CHAR_SEED
                     elif img_type == "background":
-                        prompt = f"background scene, {spec.get('art_style', '')}"
+                        prompt = f"background scene, {spec.get('art_style', '')}, no text, no speech bubbles, no Korean text, no letters, no words"
                         seed = scene.get("bg_seed", settings.BG_SEED_BASE)
                     elif img_type == "scene":
                         # General mode: unified scene image (characters + background)
                         # Prompt already built in json_converter, just add art style
-                        prompt = f"{spec.get('art_style', '파스텔 수채화')}, {base_prompt}"
+                        prompt = f"{spec.get('art_style', '파스텔 수채화')}, {base_prompt}, no text, no speech bubbles, no Korean text, no letters, no words"
                         seed = scene.get("bg_seed", settings.BG_SEED_BASE)
                     else:
-                        prompt = f"prop, {spec.get('art_style', '')}"
+                        prompt = f"prop, {spec.get('art_style', '')}, no text, no speech bubbles, no Korean text, no letters, no words"
                         seed = settings.BG_SEED_BASE + 100
 
                 # Generate image
@@ -272,30 +311,67 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     target_width, target_height = gen_width, gen_height
 
                 image_path = None
-                if client:
-                    try:
-                        # Generate image based on provider type
-                        if provider == "gemini":
-                            image_path = client.generate_image(
-                                prompt=prompt,
-                                seed=seed,
-                                width=gen_width,
-                                height=gen_height,
-                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                            )
-                        elif provider == "comfyui":
-                            image_path = client.generate_image(
-                                prompt=prompt,
-                                seed=seed,
-                                lora_name=settings.ART_STYLE_LORA,
-                                lora_strength=spec.get("lora_strength", 0.8),
-                                reference_images=spec.get("reference_images", []),
-                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                            )
-                    except Exception as e:
-                        logger.error(f"[{run_id}] Image generation failed for {scene_id}/{slot_id}: {e}")
-                        logger.warning(f"[{run_id}] Falling back to stub image")
-                        image_path = None
+                max_retries = 2  # Maximum retry attempts for stub detection
+                retry_count = 0
+
+                if stub_mode:
+                    # Stub mode: Skip API call, directly create stub image
+                    logger.info(f"[{run_id}] 🧪 STUB MODE: Skipping image generation for {scene_id}/{slot_id}")
+                    image_path = None  # Force stub image creation
+                elif client:
+                    # Retry loop for stub image detection
+                    while retry_count <= max_retries:
+                        try:
+                            # Generate image based on provider type
+                            if provider == "gemini":
+                                image_path = client.generate_image(
+                                    prompt=prompt,
+                                    seed=seed,
+                                    width=gen_width,
+                                    height=gen_height,
+                                    output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                                )
+                            elif provider == "comfyui":
+                                image_path = client.generate_image(
+                                    prompt=prompt,
+                                    seed=seed,
+                                    lora_name=settings.ART_STYLE_LORA,
+                                    lora_strength=spec.get("lora_strength", 0.8),
+                                    reference_images=spec.get("reference_images", []),
+                                    output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                                )
+
+                            # Check if generated image is stub
+                            if image_path and _is_stub_image(Path(image_path)):
+                                if retry_count < max_retries:
+                                    retry_count += 1
+                                    logger.warning(f"[{run_id}] Stub image detected for {scene_id}/{slot_id}, retrying... (attempt {retry_count}/{max_retries})")
+                                    publish_progress(run_id, log=f"⚠️ 디자이너: stub 이미지 감지 - 재생성 중 ({retry_count}/{max_retries})...")
+                                    # Delete stub file and retry
+                                    Path(image_path).unlink(missing_ok=True)
+                                    image_path = None
+                                    continue
+                                else:
+                                    logger.error(f"[{run_id}] Max retries reached for {scene_id}/{slot_id}, keeping stub image")
+                                    publish_progress(run_id, log=f"❌ 디자이너: {scene_id}_{slot_id} - 최대 재시도 초과, stub 이미지 사용")
+                                    break
+                            else:
+                                # Valid image generated, break retry loop
+                                if retry_count > 0:
+                                    logger.info(f"[{run_id}] ✓ Valid image generated for {scene_id}/{slot_id} after {retry_count} retries")
+                                    publish_progress(run_id, log=f"✓ 디자이너: {scene_id}_{slot_id} - 재생성 성공!")
+                                break
+
+                        except Exception as e:
+                            logger.error(f"[{run_id}] Image generation failed for {scene_id}/{slot_id}: {e}")
+                            if retry_count < max_retries:
+                                retry_count += 1
+                                logger.warning(f"[{run_id}] Retrying due to API error... (attempt {retry_count}/{max_retries})")
+                                continue
+                            else:
+                                logger.warning(f"[{run_id}] Max retries reached, falling back to stub image")
+                                image_path = None
+                                break
 
                 if not image_path:
                     # Create stub image (1x1 pixel PNG)

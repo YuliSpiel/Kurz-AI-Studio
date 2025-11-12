@@ -26,6 +26,10 @@ interface RunSpec {
   voice_id?: string
   video_title?: string
   layout_config?: Record<string, any>
+  // Test mode flags
+  stub_image_mode?: boolean
+  stub_music_mode?: boolean
+  stub_tts_mode?: boolean
 }
 
 interface RunStatus {
@@ -103,6 +107,8 @@ export interface PromptEnhancementResult {
   suggested_art_style: string
   suggested_music_genre: string
   suggested_num_characters: number
+  suggested_narrative_tone: string
+  suggested_plot_structure: string
   reasoning: string
 }
 

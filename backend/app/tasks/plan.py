@@ -3,8 +3,10 @@
 Generates CSV from prompt, converts to JSON, and triggers asset generation.
 """
 import logging
+import json
 from pathlib import Path
 from celery import chord, group
+from typing import List
 
 from app.celery_app import celery
 from app.orchestrator.fsm import RunState, get_fsm
@@ -13,6 +15,93 @@ from app.utils.json_converter import convert_plot_to_json
 from app.utils.progress import publish_progress
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Path, spec: dict) -> List[str]:
+    """
+    Validate plot.json and layout.json structure.
+
+    Args:
+        run_id: Run identifier
+        plot_json_path: Path to plot.json
+        layout_json_path: Path to layout.json
+        spec: RunSpec dict
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors = []
+
+    try:
+        # Load plot.json
+        with open(plot_json_path, "r", encoding="utf-8") as f:
+            plot_data = json.load(f)
+
+        # Load layout.json
+        with open(layout_json_path, "r", encoding="utf-8") as f:
+            layout_data = json.load(f)
+
+        mode = spec.get("mode", "general")
+        num_cuts = spec.get("num_cuts", 3)
+
+        # Validation 1: Check plot.json has scenes
+        if "scenes" not in plot_data or not plot_data["scenes"]:
+            errors.append("plot.json에 scenes가 없거나 비어있음")
+            return errors  # Critical error, stop validation
+
+        # Validation 2: Check scene count matches num_cuts
+        scene_count = len(plot_data["scenes"])
+        if scene_count != num_cuts:
+            errors.append(f"scenes 개수({scene_count})가 요청한 컷 수({num_cuts})와 불일치")
+
+        # Validation 3: Check each scene has required fields
+        for idx, scene in enumerate(plot_data["scenes"]):
+            scene_id = scene.get("scene_id", f"scene_{idx}")
+
+            # Check text field
+            if "text" not in scene or not scene["text"].strip():
+                errors.append(f"{scene_id}: text 필드가 비어있음")
+
+            # Mode-specific validation
+            if mode in ["general", "ad"]:
+                # General/Ad Mode: image_prompt required
+                if "image_prompt" not in scene:
+                    errors.append(f"{scene_id}: image_prompt 필드 없음")
+                elif scene.get("image_prompt") is None:
+                    errors.append(f"{scene_id}: image_prompt가 None")
+                # Note: empty string is allowed for image reuse
+
+            elif mode == "story":
+                # Story Mode: background_img required
+                if "background_img" not in scene or not scene["background_img"]:
+                    errors.append(f"{scene_id}: background_img 필드가 비어있음")
+
+        # Validation 4: Check layout.json structure
+        if "scenes" not in layout_data or not layout_data["scenes"]:
+            errors.append("layout.json에 scenes가 없거나 비어있음")
+
+        if "timeline" not in layout_data:
+            errors.append("layout.json에 timeline 필드 없음")
+
+        # Validation 5: Check layout scenes match plot scenes count
+        if "scenes" in layout_data and len(layout_data["scenes"]) != scene_count:
+            errors.append(f"layout.json scenes 개수({len(layout_data['scenes'])})가 plot.json과 불일치")
+
+        # Validation 6: Check each layout scene has images
+        for idx, scene in enumerate(layout_data.get("scenes", [])):
+            scene_id = scene.get("scene_id", f"scene_{idx}")
+            if "images" not in scene or not scene["images"]:
+                errors.append(f"{scene_id}: layout.json에 images 슬롯이 없음")
+
+        logger.info(f"[{run_id}] Validation completed: {len(errors)} errors found")
+        return errors
+
+    except json.JSONDecodeError as e:
+        errors.append(f"JSON 파싱 실패: {e}")
+        return errors
+    except Exception as e:
+        errors.append(f"검증 중 오류 발생: {e}")
+        return errors
 
 
 @celery.task(bind=True, name="tasks.plan")
@@ -72,13 +161,27 @@ def plan_task(self, run_id: str, spec: dict):
         logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
         publish_progress(run_id, progress=0.2, log=f"기획자: 레이아웃 JSON 생성 완료")
 
+        # Step 2.5: Validate plot.json and layout.json
+        logger.info(f"[{run_id}] Validating plot and layout JSON...")
+        publish_progress(run_id, progress=0.21, log="기획자: JSON 검증 중...")
+        validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, spec)
+
+        if validation_errors:
+            error_msg = f"Plot validation failed: {', '.join(validation_errors)}"
+            logger.error(f"[{run_id}] {error_msg}")
+            publish_progress(run_id, progress=0.21, log=f"❌ JSON 검증 실패: {validation_errors[0]}")
+            raise ValueError(error_msg)
+
+        logger.info(f"[{run_id}] ✓ JSON validation passed")
+        publish_progress(run_id, progress=0.22, log="✓ JSON 검증 완료")
+
         # Update FSM artifacts
         from app.main import runs
         if run_id in runs:
             runs[run_id]["artifacts"]["characters_path"] = str(characters_path)
             runs[run_id]["artifacts"]["plot_json_path"] = str(plot_json_path)
             runs[run_id]["artifacts"]["json_path"] = str(json_path)
-            runs[run_id]["progress"] = 0.2
+            runs[run_id]["progress"] = 0.22
 
         # Step 3: Transition to ASSET_GENERATION
         publish_progress(run_id, progress=0.22, log="에셋 생성 단계로 전환 중...")

@@ -42,6 +42,8 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
   "suggested_art_style": "style name",
   "suggested_music_genre": "genre",
   "suggested_num_characters": 1-2,
+  "suggested_narrative_tone": "one of: 격식형, 서술형, 친근한반말, 진지한나레이션, 감정강조, 코믹풍자",
+  "suggested_plot_structure": "one of: 기승전결, 고구마사이다, 3막구조, 비교형, 반전형, 정보나열, 감정곡선, 질문형, 루프형",
   "reasoning": "brief Korean explanation (max 2 sentences)"
 }}"""
 
@@ -87,6 +89,8 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
             "suggested_art_style",
             "suggested_music_genre",
             "suggested_num_characters",
+            "suggested_narrative_tone",
+            "suggested_plot_structure",
             "reasoning"
         ]
 
@@ -102,7 +106,9 @@ def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any
         logger.info(f"[ENHANCE] Suggested title: '{result['suggested_title']}', "
                    f"cuts: {result['suggested_num_cuts']}, "
                    f"characters: {result['suggested_num_characters']}, "
-                   f"art_style: '{result['suggested_art_style']}'")
+                   f"art_style: '{result['suggested_art_style']}', "
+                   f"tone: '{result['suggested_narrative_tone']}', "
+                   f"structure: '{result['suggested_plot_structure']}'")
 
         return result
 
