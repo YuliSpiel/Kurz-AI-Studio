@@ -20,7 +20,7 @@ def get_available_fonts() -> List[Dict[str, str]]:
     Get list of available custom fonts from the fonts directory.
 
     Returns:
-        List of dicts with font info: [{"id": "NanumGothic", "name": "나눔고딕", "path": "/path/to/font.ttf"}, ...]
+        List of dicts with font info: [{"id": "KimjungchulGothic-Regular", "name": "김중철고딕 Regular", "path": "/path/to/font.ttf"}, ...]
     """
     fonts = []
 
@@ -28,17 +28,19 @@ def get_available_fonts() -> List[Dict[str, str]]:
     if FONTS_DIR.exists():
         for font_file in FONTS_DIR.glob("*.ttf"):
             font_id = font_file.stem  # Filename without extension
+            friendly_name = FONT_NAME_MAPPING.get(font_id, font_id)
             fonts.append({
                 "id": font_id,
-                "name": font_id,  # Can be customized with a mapping
+                "name": friendly_name,
                 "path": str(font_file)
             })
 
         for font_file in FONTS_DIR.glob("*.otf"):
             font_id = font_file.stem
+            friendly_name = FONT_NAME_MAPPING.get(font_id, font_id)
             fonts.append({
                 "id": font_id,
-                "name": font_id,
+                "name": friendly_name,
                 "path": str(font_file)
             })
 
@@ -84,10 +86,14 @@ def get_font_path(font_id: str) -> str:
 
 # Friendly font name mapping (optional customization)
 FONT_NAME_MAPPING = {
-    "NanumGothic": "나눔고딕",
-    "NanumGothicBold": "나눔고딕 Bold",
-    "NanumSquare": "나눔스퀘어",
-    "NanumSquareBold": "나눔스퀘어 Bold",
+    "KimjungchulGothic-Regular": "김중철고딕 Regular",
+    "KimjungchulGothic-Bold": "김중철고딕 Bold",
+    "KimjungchulMyungjo-Regular": "김중철명조 Regular",
+    "KimjungchulMyungjo-Bold": "김중철명조 Bold",
+    "KimjungchulScript-Regular": "김중철손글씨 Regular",
+    "KimjungchulScript-Bold": "김중철손글씨 Bold",
+    "Paperlogy-4Regular": "Paperlogy Regular",
+    "Paperlogy-7Bold": "Paperlogy Bold",
     "AppleGothic": "Apple Gothic (시스템)",
     "AppleMyungjo": "Apple Myungjo (시스템)",
 }

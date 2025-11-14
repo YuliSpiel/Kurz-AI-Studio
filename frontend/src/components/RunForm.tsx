@@ -34,6 +34,9 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const [stubMusicMode, setStubMusicMode] = useState(false)
   const [stubTTSMode, setStubTTSMode] = useState(false)
 
+  // Review mode state
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+
   // Font list with fallback defaults
   const [availableFonts, setAvailableFonts] = useState<Font[]>([
     { id: 'AppleGothic', name: 'Apple Gothic (시스템)', path: 'AppleGothic' },
@@ -87,9 +90,12 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
     loadFonts()
   }, [])
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+  const handleSubmit = async (reviewMode: boolean) => {
+    if (reviewMode) {
+      setIsSubmittingReview(true)
+    } else {
+      setIsSubmitting(true)
+    }
 
     try {
       // Upload reference images
@@ -120,6 +126,8 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
         stub_image_mode: stubImageMode,
         stub_music_mode: stubMusicMode,
         stub_tts_mode: stubTTSMode,
+        // Review mode flag
+        review_mode: reviewMode,
       })
 
       onRunCreated(result.run_id)
@@ -128,6 +136,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       alert('Run 생성 실패: ' + error)
     } finally {
       setIsSubmitting(false)
+      setIsSubmittingReview(false)
     }
   }
 
@@ -160,7 +169,8 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const handleApplyEnhancement = () => {
     if (!enhancementResult) return
 
-    setPrompt(enhancementResult.enhanced_prompt)
+    // Use suggested_plot_outline instead of enhanced_prompt
+    setPrompt(enhancementResult.suggested_plot_outline)
     setVideoTitle(enhancementResult.suggested_title)
     setNumCuts(enhancementResult.suggested_num_cuts)
     setNumCharacters(enhancementResult.suggested_num_characters as 1 | 2 | 3)
@@ -516,9 +526,34 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           </div>
         </div>
 
-        <button type="submit" disabled={isSubmitting || !prompt} className="btn-submit" onClick={handleSubmit}>
-          {isSubmitting ? '생성 중...' : '숏츠 생성 시작'}
-        </button>
+        <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+          <button
+            type="button"
+            disabled={isSubmitting || isSubmittingReview || !prompt}
+            className="btn-submit"
+            onClick={() => handleSubmit(false)}
+            style={{
+              flex: 1,
+              backgroundColor: isSubmitting ? '#9CA3AF' : '#10B981',
+              cursor: (isSubmitting || isSubmittingReview || !prompt) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isSubmitting ? '생성 중...' : '🚀 자동 모드 (즉시 생성)'}
+          </button>
+          <button
+            type="button"
+            disabled={isSubmitting || isSubmittingReview || !prompt}
+            className="btn-submit"
+            onClick={() => handleSubmit(true)}
+            style={{
+              flex: 1,
+              backgroundColor: isSubmittingReview ? '#9CA3AF' : '#7C3AED',
+              cursor: (isSubmitting || isSubmittingReview || !prompt) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isSubmittingReview ? '생성 중...' : '✏️ 검수 모드 (플롯 확인 후 생성)'}
+          </button>
+        </div>
       </div>
 
       {/* Enhancement Preview Modal */}
@@ -581,22 +616,6 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
                 whiteSpace: 'pre-wrap',
               }}>
                 {enhancementResult.suggested_plot_outline}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>
-                풍부화된 프롬프트
-              </label>
-              <div style={{
-                padding: '12px',
-                backgroundColor: '#F3F4F6',
-                borderRadius: '8px',
-                fontSize: '14px',
-                lineHeight: '1.6',
-                color: '#1F2937',
-              }}>
-                {enhancementResult.enhanced_prompt}
               </div>
             </div>
 

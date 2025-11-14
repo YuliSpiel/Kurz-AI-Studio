@@ -20,7 +20,8 @@
       "Bash(python test_gemini_client.py:*)",
       "Bash(python test_enhance.py:*)",
       "Bash(python:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(kill:*)"
     ],
     "deny": [],
     "ask": []

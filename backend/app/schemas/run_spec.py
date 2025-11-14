@@ -101,6 +101,12 @@ class RunSpec(BaseModel):
         description="테스트 모드: TTS API 호출 생략 (더미 음성 사용)"
     )
 
+    # Plot review mode
+    review_mode: bool = Field(
+        default=False,
+        description="검수 모드: 플롯 생성 후 사용자 검수 단계 추가"
+    )
+
 
 class RunStatus(BaseModel):
     """Run status and progress information."""

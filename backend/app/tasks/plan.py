@@ -246,10 +246,9 @@ def plan_task(self, run_id: str, spec: dict):
         validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, characters_path, spec)
 
         if validation_errors:
-            # Check retry count
-            from app.main import runs
+            # Check retry count from FSM metadata (persistent across Celery retries)
             max_retries = 2
-            retry_count = runs.get(run_id, {}).get("artifacts", {}).get("plot_retry_count", 0)
+            retry_count = fsm.metadata.get("plot_retry_count", 0)
 
             if retry_count < max_retries:
                 # Log retry attempt
@@ -257,9 +256,10 @@ def plan_task(self, run_id: str, spec: dict):
                 logger.warning(f"[{run_id}] Validation errors: {', '.join(validation_errors)}")
                 publish_progress(run_id, progress=0.21, log=f"⚠️ JSON 검증 실패 - 재생성 시도 ({retry_count + 1}/{max_retries})")
 
-                # Update retry counter
-                if run_id in runs:
-                    runs[run_id]["artifacts"]["plot_retry_count"] = retry_count + 1
+                # Update retry counter in FSM metadata (persistent)
+                fsm.metadata["plot_retry_count"] = retry_count + 1
+                from app.orchestrator.fsm import register_fsm
+                register_fsm(fsm)
 
                 # Clean up old files
                 plot_json_path.unlink(missing_ok=True)
@@ -290,43 +290,82 @@ def plan_task(self, run_id: str, spec: dict):
             runs[run_id]["artifacts"]["json_path"] = str(json_path)
             runs[run_id]["progress"] = 0.22
 
-        # Step 3: Transition to ASSET_GENERATION
-        publish_progress(run_id, progress=0.22, log="에셋 생성 단계로 전환 중...")
-        if fsm.transition_to(RunState.ASSET_GENERATION):
-            logger.info(f"[{run_id}] Transitioned to ASSET_GENERATION")
-            publish_progress(run_id, state="ASSET_GENERATION", progress=0.25, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
+        # Step 3: Branch based on review_mode
+        if spec.get("review_mode", False):
+            # Review mode: Transition to PLOT_REVIEW (user approval needed)
+            publish_progress(run_id, progress=0.22, log="플롯 검수 대기 중...")
+            if fsm.transition_to(RunState.PLOT_REVIEW):
+                logger.info(f"[{run_id}] [REVIEW_MODE] Transitioned to PLOT_REVIEW - waiting for user approval")
+                publish_progress(run_id, state="PLOT_REVIEW", progress=0.25, log="✓ 플롯 생성 완료 - 사용자 검수 필요")
 
-            # Update state
-            if run_id in runs:
-                runs[run_id]["state"] = fsm.current_state.value
+                # Update state
+                if run_id in runs:
+                    runs[run_id]["state"] = fsm.current_state.value
 
-            # Step 4: Fan-out to asset generation tasks
-            from app.tasks.designer import designer_task
-            from app.tasks.composer import composer_task
-            from app.tasks.voice import voice_task
-            from app.tasks.director import director_task
+                # Load plot.json data
+                import json
+                with open(plot_json_path, 'r', encoding='utf-8') as f:
+                    plot_data = json.load(f)
 
-            # Convert Path to string for JSON serialization
-            json_path_str = str(json_path)
+                # Save CSV version of plot for user editing
+                from app.utils.plot_csv_converter import save_plot_csv
+                plot_csv_path = save_plot_csv(run_id, plot_data, mode=spec["mode"])
+                logger.info(f"[{run_id}] Saved plot CSV for user review: {plot_csv_path}")
 
-            # Create chord: parallel tasks → director callback
-            asset_tasks = group(
-                designer_task.s(run_id, json_path_str, spec),
-                composer_task.s(run_id, json_path_str, spec),
-                voice_task.s(run_id, json_path_str, spec),
-            )
+                # Update artifacts
+                if run_id in runs:
+                    runs[run_id]["artifacts"]["plot_csv_path"] = str(plot_csv_path)
 
-            # Chord: when all complete, trigger director
-            workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
+                # Wait here - user needs to confirm/edit/regenerate
+                # The workflow will continue via API endpoint (see main.py)
+                return {
+                    "status": "plot_review_pending",
+                    "run_id": run_id,
+                    "message": "Plot generation complete, waiting for user review"
+                }
+            else:
+                error_msg = f"Failed to transition to PLOT_REVIEW"
+                logger.error(f"[{run_id}] {error_msg}")
+                publish_progress(run_id, progress=0.22, log=f"❌ 상태 전환 실패")
+                raise ValueError(error_msg)
+        else:
+            # Auto mode: Transition directly to ASSET_GENERATION
+            publish_progress(run_id, progress=0.22, log="에셋 생성 단계로 전환 중...")
+            if fsm.transition_to(RunState.ASSET_GENERATION):
+                logger.info(f"[{run_id}] [AUTO_MODE] Transitioned to ASSET_GENERATION")
+                publish_progress(run_id, state="ASSET_GENERATION", progress=0.25, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
 
-            logger.info(f"[{run_id}] Asset generation chord started")
+                # Update state
+                if run_id in runs:
+                    runs[run_id]["state"] = fsm.current_state.value
 
-        return {
-            "run_id": run_id,
-            "plot_json_path": str(plot_json_path),
-            "json_path": str(json_path),
-            "status": "success"
-        }
+                # Step 4: Fan-out to asset generation tasks
+                from app.tasks.designer import designer_task
+                from app.tasks.composer import composer_task
+                from app.tasks.voice import voice_task
+                from app.tasks.director import director_task
+
+                # Convert Path to string for JSON serialization
+                json_path_str = str(json_path)
+
+                # Create chord: parallel tasks → director callback
+                asset_tasks = group(
+                    designer_task.s(run_id, json_path_str, spec),
+                    composer_task.s(run_id, json_path_str, spec),
+                    voice_task.s(run_id, json_path_str, spec),
+                )
+
+                # Chord: when all complete, trigger director
+                workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
+
+                logger.info(f"[{run_id}] Asset generation chord started")
+
+            return {
+                "run_id": run_id,
+                "plot_json_path": str(plot_json_path),
+                "json_path": str(json_path),
+                "status": "success"
+            }
 
     except Retry:
         # Let Celery handle retry - don't mark as failed

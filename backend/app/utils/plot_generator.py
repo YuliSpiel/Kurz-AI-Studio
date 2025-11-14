@@ -238,7 +238,7 @@ JSON 형식:
                     {"role": "system", "content": char_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.9,  # Increased for more diverse character generation
                 max_tokens=2000
             )
 
@@ -581,7 +581,7 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
                 {"role": "system", "content": plot_prompt},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.8,
+            temperature=1.0,  # Increased for more creative and diverse plot generation
             max_tokens=8000
         )
 

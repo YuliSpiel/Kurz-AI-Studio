@@ -30,6 +30,8 @@ interface RunSpec {
   stub_image_mode?: boolean
   stub_music_mode?: boolean
   stub_tts_mode?: boolean
+  // Plot review mode
+  review_mode?: boolean
 }
 
 interface RunStatus {
@@ -133,4 +135,46 @@ export async function enhancePrompt(
   }
 
   return response.json()
+}
+
+export interface PlotCsvData {
+  run_id: string
+  csv_content: string
+  mode: string
+}
+
+export async function getPlotCsv(runId: string): Promise<PlotCsvData> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-csv`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to get plot CSV: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export async function confirmPlot(runId: string, editedCsv?: string): Promise<void> {
+  const body = editedCsv ? { edited_csv: editedCsv } : {}
+
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-confirm`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to confirm plot: ${response.statusText}`)
+  }
+}
+
+export async function regeneratePlot(runId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-regenerate`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to regenerate plot: ${response.statusText}`)
+  }
 }
