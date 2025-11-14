@@ -1,19 +1,24 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { createRun, uploadReferenceImage, getAvailableFonts, Font } from '../api/client'
+import { createRun, uploadReferenceImage, getAvailableFonts, Font, enhancePrompt, PromptEnhancementResult } from '../api/client'
 
 interface RunFormProps {
   onRunCreated: (runId: string) => void
 }
 
 export default function RunForm({ onRunCreated }: RunFormProps) {
-  const [mode, setMode] = useState<'general' | 'story' | 'ad'>('general')
+  const mode = 'general' // Fixed to general mode
   const [prompt, setPrompt] = useState('')
-  const [numCharacters, setNumCharacters] = useState<1 | 2>(1)
   const [numCuts, setNumCuts] = useState(3)
+  const [numCharacters, setNumCharacters] = useState<1 | 2 | 3>(1)
   const [artStyle, setArtStyle] = useState('파스텔 수채화')
   const [musicGenre, setMusicGenre] = useState('ambient')
+  const [narrativeTone, setNarrativeTone] = useState('격식형')
+  const [plotStructure, setPlotStructure] = useState('기승전결')
   const [referenceFiles, setReferenceFiles] = useState<File[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isEnhancing, setIsEnhancing] = useState(false)
+  const [enhancementResult, setEnhancementResult] = useState<PromptEnhancementResult | null>(null)
+  const [showEnhancementPreview, setShowEnhancementPreview] = useState(false)
 
   // Layout customization states
   const [videoTitle, setVideoTitle] = useState('')
@@ -23,39 +28,74 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
   const [subtitleFont, setSubtitleFont] = useState('AppleGothic')
   const [subtitleFontSize, setSubtitleFontSize] = useState(80)
 
-  // Font list
-  const [availableFonts, setAvailableFonts] = useState<Font[]>([])
+  // Test mode states (Option+Shift+T)
+  const [showTestMode, setShowTestMode] = useState(false)
+  const [stubImageMode, setStubImageMode] = useState(false)
+  const [stubMusicMode, setStubMusicMode] = useState(false)
+  const [stubTTSMode, setStubTTSMode] = useState(false)
+
+  // Review mode state
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+
+  // Font list with fallback defaults
+  const [availableFonts, setAvailableFonts] = useState<Font[]>([
+    { id: 'AppleGothic', name: 'Apple Gothic (시스템)', path: 'AppleGothic' },
+    { id: 'AppleMyungjo', name: 'Apple Myungjo (시스템)', path: 'AppleMyungjo' }
+  ])
+
+  // Keyboard shortcut for test mode (Option+Shift+T)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault()
+        setShowTestMode(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Load available fonts on component mount
   useEffect(() => {
     const loadFonts = async () => {
       try {
+        console.log('Loading fonts from API...')
         const fonts = await getAvailableFonts()
-        setAvailableFonts(fonts)
+        console.log('Loaded fonts:', fonts)
 
-        // Dynamically load custom fonts for preview
-        fonts.forEach(font => {
-          // Skip system fonts (they don't have file paths in /api/fonts/)
-          if (font.id.startsWith('Apple')) return
+        if (fonts && fonts.length > 0) {
+          setAvailableFonts(fonts)
 
-          const fontFace = new FontFace(font.id, `url(/api/fonts/${font.id})`)
-          fontFace.load().then(loadedFont => {
-            document.fonts.add(loadedFont)
-            console.log(`Loaded font: ${font.id}`)
-          }).catch(err => {
-            console.warn(`Failed to load font ${font.id}:`, err)
+          // Dynamically load custom fonts for preview
+          fonts.forEach(font => {
+            // Skip system fonts (they don't have file paths in /api/fonts/)
+            if (font.id.startsWith('Apple')) return
+
+            const fontFace = new FontFace(font.id, `url(/api/fonts/${font.id})`)
+            fontFace.load().then(loadedFont => {
+              document.fonts.add(loadedFont)
+              console.log(`Loaded font: ${font.id}`)
+            }).catch(err => {
+              console.warn(`Failed to load font ${font.id}:`, err)
+            })
           })
-        })
+        } else {
+          console.warn('No fonts returned from API, using fallback fonts')
+        }
       } catch (error) {
         console.error('Failed to load fonts:', error)
+        console.log('Using fallback fonts')
       }
     }
     loadFonts()
   }, [])
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+  const handleSubmit = async (reviewMode: boolean) => {
+    if (reviewMode) {
+      setIsSubmittingReview(true)
+    } else {
+      setIsSubmitting(true)
+    }
 
     try {
       // Upload reference images
@@ -65,10 +105,10 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
         referenceImages.push(filename)
       }
 
-      // Create run with layout customization
+      // Create run with layout customization and test mode flags
       const result = await createRun({
         mode,
-        prompt,
+        prompt: `${prompt}\n\n[스타일 지시: 말투="${narrativeTone}", 전개구조="${plotStructure}"]`,
         num_characters: numCharacters,
         num_cuts: numCuts,
         art_style: artStyle,
@@ -82,6 +122,12 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           subtitle_font: subtitleFont,
           subtitle_font_size: subtitleFontSize,
         },
+        // Test mode flags
+        stub_image_mode: stubImageMode,
+        stub_music_mode: stubMusicMode,
+        stub_tts_mode: stubTTSMode,
+        // Review mode flag
+        review_mode: reviewMode,
       })
 
       onRunCreated(result.run_id)
@@ -90,6 +136,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       alert('Run 생성 실패: ' + error)
     } finally {
       setIsSubmitting(false)
+      setIsSubmittingReview(false)
     }
   }
 
@@ -99,19 +146,51 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
     }
   }
 
+  const handleEnhancePrompt = async () => {
+    if (!prompt || prompt.trim().length === 0) {
+      alert('프롬프트를 먼저 입력해주세요')
+      return
+    }
+
+    setIsEnhancing(true)
+    try {
+      const result = await enhancePrompt(prompt, mode)
+      setEnhancementResult(result)
+      setShowEnhancementPreview(true)
+    } catch (error: any) {
+      console.error('Failed to enhance prompt:', error)
+      const errorMessage = error?.message || String(error)
+      alert(`프롬프트 풍부화 실패:\n${errorMessage}\n\n백엔드 서버가 실행 중인지 확인해주세요.`)
+    } finally {
+      setIsEnhancing(false)
+    }
+  }
+
+  const handleApplyEnhancement = () => {
+    if (!enhancementResult) return
+
+    // Use suggested_plot_outline instead of enhanced_prompt
+    setPrompt(enhancementResult.suggested_plot_outline)
+    setVideoTitle(enhancementResult.suggested_title)
+    setNumCuts(enhancementResult.suggested_num_cuts)
+    setNumCharacters(enhancementResult.suggested_num_characters as 1 | 2 | 3)
+    setArtStyle(enhancementResult.suggested_art_style)
+    setMusicGenre(enhancementResult.suggested_music_genre)
+    setNarrativeTone(enhancementResult.suggested_narrative_tone)
+    setPlotStructure(enhancementResult.suggested_plot_structure)
+    setShowEnhancementPreview(false)
+    setEnhancementResult(null)
+  }
+
+  const handleCancelEnhancement = () => {
+    setShowEnhancementPreview(false)
+    setEnhancementResult(null)
+  }
+
   return (
     <div className="run-form-wrapper">
       <form onSubmit={handleSubmit} className="run-form">
         <h2>새 숏츠 생성</h2>
-
-      <div className="form-group">
-        <label>모드</label>
-        <select value={mode} onChange={(e) => setMode(e.target.value as 'general' | 'story' | 'ad')}>
-          <option value="general">일반</option>
-          <option value="story">스토리텔링</option>
-          <option value="ad">광고</option>
-        </select>
-      </div>
 
       <div className="form-group">
         <label>프롬프트</label>
@@ -122,31 +201,42 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           rows={4}
           required
         />
+        <button
+          type="button"
+          onClick={handleEnhancePrompt}
+          disabled={isEnhancing || !prompt}
+          className="btn-enhance"
+          style={{
+            marginTop: '10px',
+            padding: '8px 16px',
+            backgroundColor: '#7C3AED',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: prompt ? 'pointer' : 'not-allowed',
+            fontSize: '14px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            opacity: (isEnhancing || !prompt) ? 0.6 : 1,
+          }}
+        >
+          <span style={{ fontSize: '16px' }}>✨</span>
+          {isEnhancing ? 'AI 분석 중...' : 'AI 풍부화'}
+        </button>
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
-          <label>등장인물 수</label>
-          <select
-            value={numCharacters}
-            onChange={(e) => setNumCharacters(Number(e.target.value) as 1 | 2)}
-          >
-            <option value={1}>1명</option>
-            <option value={2}>2명</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label>컷 수 (1-10)</label>
-          <input
-            type="number"
-            value={numCuts}
-            onChange={(e) => setNumCuts(Number(e.target.value))}
-            min={1}
-            max={10}
-            required
-          />
-        </div>
+      <div className="form-group">
+        <label>컷 수 (1-10)</label>
+        <input
+          type="number"
+          value={numCuts}
+          onChange={(e) => setNumCuts(Number(e.target.value))}
+          min={1}
+          max={10}
+          required
+        />
       </div>
 
       <div className="form-group">
@@ -170,6 +260,39 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
       </div>
 
       <div className="form-group">
+        <label>내레이션 말투</label>
+        <select
+          value={narrativeTone}
+          onChange={(e) => setNarrativeTone(e.target.value)}
+        >
+          <option value="격식형">격식형 (-입니다체) - 뉴스, 해설, 교육</option>
+          <option value="서술형">서술형 (-함.체) - 요약, 정보전달</option>
+          <option value="친근한반말">친근한 반말 (-거야, -지?) - 광고, 추천</option>
+          <option value="진지한나레이션">진지한 나레이션체 - 스토리, 다큐</option>
+          <option value="감정강조">감정 강조형 - 리액션, 감정 몰입</option>
+          <option value="코믹풍자">코믹/풍자형 - 병맛, 밈 기반</option>
+        </select>
+      </div>
+
+      <div className="form-group">
+        <label>전개 구조</label>
+        <select
+          value={plotStructure}
+          onChange={(e) => setPlotStructure(e.target.value)}
+        >
+          <option value="기승전결">고전적 기승전결 - 스토리텔링, 교육</option>
+          <option value="고구마사이다">고구마-사이다형 - 답답함→반전 해결</option>
+          <option value="3막구조">3막 구조 (시작-위기-해결) - 간결한 내러티브</option>
+          <option value="비교형">비교형 (Before-After) - 변화 강조</option>
+          <option value="반전형">반전형 (Twist Ending) - 밈, 코믹, 리액션</option>
+          <option value="정보나열">정보 나열형 (Listicle) - 트렌드 요약</option>
+          <option value="감정곡선">감정 곡선형 - 공감→위로→희망</option>
+          <option value="질문형">질문형 오프닝 - 호기심 유발</option>
+          <option value="루프형">루프형 (Looped Ending) - 반복 시청 유도</option>
+        </select>
+      </div>
+
+      <div className="form-group">
         <label>참조 이미지 (선택)</label>
         <input
           type="file"
@@ -181,6 +304,65 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           <p className="file-count">{referenceFiles.length}개 파일 선택됨</p>
         )}
       </div>
+
+      {/* Test Mode Panel (Option+Shift+T) */}
+      {showTestMode && (
+        <div style={{
+          marginTop: '20px',
+          padding: '15px',
+          backgroundColor: '#FFF3CD',
+          border: '2px solid #FFC107',
+          borderRadius: '8px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            marginBottom: '10px',
+            fontWeight: 'bold',
+            color: '#856404'
+          }}>
+            <span style={{ fontSize: '18px', marginRight: '8px' }}>🧪</span>
+            테스트 모드 (API 호출 생략)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubImageMode}
+                onChange={(e) => setStubImageMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub 이미지 모드 (Gemini 이미지 생성 생략)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubMusicMode}
+                onChange={(e) => setStubMusicMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub 음원 모드 (ElevenLabs 음악 생성 생략)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stubTTSMode}
+                onChange={(e) => setStubTTSMode(e.target.checked)}
+                style={{ marginRight: '8px', cursor: 'pointer' }}
+              />
+              <span>Stub TTS 모드 (ElevenLabs 음성 합성 생략)</span>
+            </label>
+          </div>
+          <p style={{
+            marginTop: '10px',
+            fontSize: '12px',
+            color: '#856404',
+            fontStyle: 'italic'
+          }}>
+            💡 Option+Shift+T를 다시 누르면 테스트 모드가 숨겨집니다
+          </p>
+        </div>
+      )}
       </form>
 
       {/* Layout Customization Section */}
@@ -242,7 +424,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
                     textAlign: 'center',
                     width: '90%'
                   }}>
-                    "고구마가 세상에서 제일 맛있어!"
+                    카피바라와 친구들이 온천에서 힐링하고있어요!
                   </span>
                 </div>
                 {/* Background Image - 1:1, positioned at 60% from top (matching render) */}
@@ -253,7 +435,7 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
                   display: 'flex'
                 }}>
                   <img
-                    src="/outputs/20251107_1617_고구마를좋아하는/scene_1_scene.png"
+                    src="/outputs/20251111_1441_카피바라가온천을/scene_4_scene.png"
                     alt="Preview"
                     style={{
                       position: 'absolute',
@@ -344,10 +526,187 @@ export default function RunForm({ onRunCreated }: RunFormProps) {
           </div>
         </div>
 
-        <button type="submit" disabled={isSubmitting || !prompt} className="btn-submit" onClick={handleSubmit}>
-          {isSubmitting ? '생성 중...' : '숏츠 생성 시작'}
-        </button>
+        <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+          <button
+            type="button"
+            disabled={isSubmitting || isSubmittingReview || !prompt}
+            className="btn-submit"
+            onClick={() => handleSubmit(false)}
+            style={{
+              flex: 1,
+              backgroundColor: isSubmitting ? '#9CA3AF' : '#10B981',
+              cursor: (isSubmitting || isSubmittingReview || !prompt) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isSubmitting ? '생성 중...' : '🚀 자동 모드 (즉시 생성)'}
+          </button>
+          <button
+            type="button"
+            disabled={isSubmitting || isSubmittingReview || !prompt}
+            className="btn-submit"
+            onClick={() => handleSubmit(true)}
+            style={{
+              flex: 1,
+              backgroundColor: isSubmittingReview ? '#9CA3AF' : '#7C3AED',
+              cursor: (isSubmitting || isSubmittingReview || !prompt) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isSubmittingReview ? '생성 중...' : '✏️ 검수 모드 (플롯 확인 후 생성)'}
+          </button>
+        </div>
       </div>
+
+      {/* Enhancement Preview Modal */}
+      {showEnhancementPreview && enhancementResult && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '12px',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '24px', color: '#1F2937' }}>
+              ✨ AI 풍부화 결과
+            </h3>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>
+                제안된 영상 제목
+              </label>
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#EEF2FF',
+                borderRadius: '8px',
+                fontSize: '16px',
+                fontWeight: '600',
+                lineHeight: '1.4',
+                color: '#4338CA',
+              }}>
+                {enhancementResult.suggested_title}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>
+                📖 예상 플롯
+              </label>
+              <div style={{
+                padding: '14px',
+                backgroundColor: '#F0FDF4',
+                borderLeft: '4px solid #10B981',
+                borderRadius: '8px',
+                fontSize: '14px',
+                lineHeight: '1.8',
+                color: '#065F46',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {enhancementResult.suggested_plot_outline}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
+                  컷 수
+                </label>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: '#7C3AED' }}>
+                  {enhancementResult.suggested_num_cuts}개
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
+                  캐릭터 수
+                </label>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: '#10B981' }}>
+                  {enhancementResult.suggested_num_characters}명
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
+                  화풍
+                </label>
+                <div style={{ fontSize: '16px', fontWeight: '500', color: '#1F2937' }}>
+                  {enhancementResult.suggested_art_style}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
+                  음악 장르
+                </label>
+                <div style={{ fontSize: '16px', fontWeight: '500', color: '#1F2937' }}>
+                  {enhancementResult.suggested_music_genre}
+                </div>
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px',
+              backgroundColor: '#FEF3C7',
+              borderLeft: '4px solid #F59E0B',
+              borderRadius: '6px',
+              marginBottom: '24px',
+            }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#92400E', marginBottom: '4px' }}>
+                💡 제안 이유
+              </div>
+              <div style={{ fontSize: '13px', color: '#78350F', lineHeight: '1.5' }}>
+                {enhancementResult.reasoning}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleCancelEnhancement}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#E5E7EB',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={handleApplyEnhancement}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#7C3AED',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                }}
+              >
+                적용하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

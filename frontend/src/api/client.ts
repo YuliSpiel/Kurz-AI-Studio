@@ -14,7 +14,7 @@ interface CharacterInput {
 }
 
 interface RunSpec {
-  mode: 'story' | 'ad'
+  mode: 'general' | 'story' | 'ad'
   prompt: string
   num_characters: 1 | 2 | 3
   num_cuts: number
@@ -24,6 +24,14 @@ interface RunSpec {
   reference_images?: string[]
   lora_strength?: number
   voice_id?: string
+  video_title?: string
+  layout_config?: Record<string, any>
+  // Test mode flags
+  stub_image_mode?: boolean
+  stub_music_mode?: boolean
+  stub_tts_mode?: boolean
+  // Plot review mode
+  review_mode?: boolean
 }
 
 interface RunStatus {
@@ -92,4 +100,81 @@ export async function getAvailableFonts(): Promise<Font[]> {
 
   const data = await response.json()
   return data.fonts || []
+}
+
+export interface PromptEnhancementResult {
+  enhanced_prompt: string
+  suggested_title: string
+  suggested_plot_outline: string
+  suggested_num_cuts: number
+  suggested_art_style: string
+  suggested_music_genre: string
+  suggested_num_characters: number
+  suggested_narrative_tone: string
+  suggested_plot_structure: string
+  reasoning: string
+}
+
+export async function enhancePrompt(
+  originalPrompt: string,
+  mode: string = 'general'
+): Promise<PromptEnhancementResult> {
+  const response = await fetch(`${API_BASE}/v1/enhance-prompt`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      original_prompt: originalPrompt,
+      mode: mode,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to enhance prompt: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export interface PlotCsvData {
+  run_id: string
+  csv_content: string
+  mode: string
+}
+
+export async function getPlotCsv(runId: string): Promise<PlotCsvData> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-csv`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to get plot CSV: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export async function confirmPlot(runId: string, editedCsv?: string): Promise<void> {
+  const body = editedCsv ? { edited_csv: editedCsv } : {}
+
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-confirm`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to confirm plot: ${response.statusText}`)
+  }
+}
+
+export async function regeneratePlot(runId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-regenerate`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to regenerate plot: ${response.statusText}`)
+  }
 }

@@ -64,8 +64,9 @@ class ElevenLabsMusicClient(MusicProvider):
 
             payload = {
                 "text": prompt,
-                "duration_seconds": min(duration_sec, 22),  # ElevenLabs 최대 22초
-                "prompt_influence": 0.3  # 프롬프트 영향력 (0-1)
+                "duration_seconds": min(duration_sec, 30),  # ElevenLabs v2 최대 30초
+                "prompt_influence": 0.3,  # 프롬프트 영향력 (0-1)
+                "model_id": "eleven_text_to_sound_v2"  # v2 모델 사용
             }
 
             with httpx.Client(timeout=60.0) as client:
@@ -124,7 +125,8 @@ class ElevenLabsMusicClient(MusicProvider):
         mood_desc = mood_map.get(mood.lower(), mood)
 
         # ElevenLabs Sound Effects는 자연어 프롬프트 사용
-        prompt = f"{mood_desc} {genre_desc}, instrumental, no vocals, looping"
+        # "seamless loop" 키워드로 시작/끝이 자연스럽게 이어지는 음원 생성 시도
+        prompt = f"{mood_desc} {genre_desc}, instrumental, no vocals, seamless loop, loopable"
 
         return prompt
 

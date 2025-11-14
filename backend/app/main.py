@@ -300,6 +300,239 @@ async def upload_reference_image(file: UploadFile = File(...)):
     return {"filename": filename, "path": str(filepath), "size": len(content)}
 
 
+@app.post("/api/v1/enhance-prompt")
+async def enhance_prompt_endpoint(request: dict):
+    """
+    Enhance user prompt using AI analysis.
+
+    Request body:
+        {
+            "original_prompt": "사용자 입력 프롬프트",
+            "mode": "general" (optional, default: "general")
+        }
+
+    Response:
+        {
+            "enhanced_prompt": "풍부화된 프롬프트",
+            "suggested_title": "제안된 영상 제목",
+            "suggested_num_cuts": 3,
+            "suggested_art_style": "파스텔 수채화",
+            "suggested_music_genre": "ambient",
+            "suggested_num_characters": 1,
+            "reasoning": "제안 이유"
+        }
+    """
+    from app.utils.prompt_enhancer import enhance_prompt
+
+    original_prompt = request.get("original_prompt")
+    mode = request.get("mode", "general")
+
+    if not original_prompt:
+        raise HTTPException(status_code=400, detail="original_prompt is required")
+
+    if mode not in ["general", "story", "ad"]:
+        raise HTTPException(status_code=400, detail="mode must be 'general', 'story', or 'ad'")
+
+    try:
+        logger.info(f"[ENHANCE] Enhancing prompt for mode={mode}: '{original_prompt[:50]}...'")
+        result = enhance_prompt(original_prompt, mode)
+        logger.info(f"[ENHANCE] Successfully enhanced prompt")
+        return result
+    except ValueError as e:
+        logger.error(f"[ENHANCE] Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[ENHANCE] Failed to enhance prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to enhance prompt: {str(e)}")
+
+
+@app.get("/api/v1/runs/{run_id}/plot-csv")
+async def get_plot_csv(run_id: str):
+    """
+    Get plot as CSV for user editing.
+
+    Response:
+        {
+            "run_id": "abc123",
+            "csv_content": "scene_id,image_prompt,text,speaker,duration_ms\n...",
+            "mode": "general"
+        }
+    """
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    run_data = runs[run_id]
+    plot_csv_path = run_data["artifacts"].get("plot_csv_path")
+
+    if not plot_csv_path or not Path(plot_csv_path).exists():
+        raise HTTPException(status_code=404, detail=f"Plot CSV not found for run {run_id}")
+
+    try:
+        csv_content = Path(plot_csv_path).read_text(encoding="utf-8")
+        return {
+            "run_id": run_id,
+            "csv_content": csv_content,
+            "mode": run_data.get("mode", "general")
+        }
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to read plot CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read plot CSV: {str(e)}")
+
+
+@app.post("/api/v1/runs/{run_id}/plot-confirm")
+async def confirm_plot(run_id: str, request: dict = None):
+    """
+    Confirm plot and proceed to asset generation.
+
+    Request body (optional):
+        {
+            "edited_csv": "scene_id,image_prompt,...\n..." (optional - if user edited CSV)
+        }
+
+    Response:
+        {
+            "status": "success",
+            "message": "Plot confirmed, proceeding to asset generation"
+        }
+    """
+    from app.orchestrator.fsm import get_fsm, RunState
+    from app.tasks.designer import designer_task
+    from app.tasks.composer import composer_task
+    from app.tasks.voice import voice_task
+    from app.tasks.director import director_task
+    from celery import chord, group
+    from app.utils.progress import publish_progress
+
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    fsm = get_fsm(run_id)
+    if not fsm:
+        raise HTTPException(status_code=404, detail=f"FSM not found for run {run_id}")
+
+    if fsm.current_state != RunState.PLOT_REVIEW:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot confirm plot: current state is {fsm.current_state.value}, expected PLOT_REVIEW"
+        )
+
+    try:
+        # If user edited CSV, update plot.json
+        if request and "edited_csv" in request:
+            edited_csv = request["edited_csv"]
+            mode = runs[run_id].get("mode", "general")
+
+            from app.utils.plot_csv_converter import load_and_update_plot
+            plot_path = load_and_update_plot(run_id, edited_csv, mode)
+            logger.info(f"[{run_id}] Updated plot.json from user-edited CSV")
+
+            # Regenerate layout.json from updated plot.json
+            from app.utils.json_converter import generate_layout
+            import json
+
+            spec = runs[run_id]["spec"]
+            plot_json_path = runs[run_id]["artifacts"]["plot_json_path"]
+            characters_json_path = runs[run_id]["artifacts"]["characters_path"]
+
+            with open(plot_json_path, 'r', encoding='utf-8') as f:
+                plot_data = json.load(f)
+
+            characters_data = None
+            if Path(characters_json_path).exists():
+                with open(characters_json_path, 'r', encoding='utf-8') as f:
+                    characters_data = json.load(f)
+
+            output_dir = Path(f"app/data/outputs/{run_id}")
+            layout_path = generate_layout(plot_data, characters_data, output_dir, spec)
+            runs[run_id]["artifacts"]["json_path"] = str(layout_path)
+            logger.info(f"[{run_id}] Regenerated layout.json from edited plot")
+
+        # Transition to ASSET_GENERATION
+        publish_progress(run_id, progress=0.25, log="플롯 확정 - 에셋 생성 시작...")
+        if fsm.transition_to(RunState.ASSET_GENERATION):
+            logger.info(f"[{run_id}] Plot confirmed, transitioning to ASSET_GENERATION")
+            publish_progress(run_id, state="ASSET_GENERATION", progress=0.3, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
+
+            runs[run_id]["state"] = fsm.current_state.value
+
+            # Start asset generation chord
+            json_path_str = runs[run_id]["artifacts"]["json_path"]
+            spec = runs[run_id]["spec"]
+
+            asset_tasks = group(
+                designer_task.s(run_id, json_path_str, spec),
+                composer_task.s(run_id, json_path_str, spec),
+                voice_task.s(run_id, json_path_str, spec),
+            )
+
+            workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
+            logger.info(f"[{run_id}] Asset generation chord started")
+
+            return {
+                "status": "success",
+                "message": "Plot confirmed, proceeding to asset generation"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to transition to ASSET_GENERATION")
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to confirm plot: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to confirm plot: {str(e)}")
+
+
+@app.post("/api/v1/runs/{run_id}/plot-regenerate")
+async def regenerate_plot(run_id: str):
+    """
+    Regenerate plot with higher temperature for variety.
+
+    Response:
+        {
+            "status": "success",
+            "message": "Plot regeneration started"
+        }
+    """
+    from app.orchestrator.fsm import get_fsm, RunState
+    from app.tasks.plan import plan_task
+    from app.utils.progress import publish_progress
+
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    fsm = get_fsm(run_id)
+    if not fsm:
+        raise HTTPException(status_code=404, detail=f"FSM not found for run {run_id}")
+
+    if fsm.current_state != RunState.PLOT_REVIEW:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot regenerate plot: current state is {fsm.current_state.value}, expected PLOT_REVIEW"
+        )
+
+    try:
+        # Transition back to PLOT_GENERATION
+        publish_progress(run_id, progress=0.1, log="플롯 재생성 요청 - 기획자 다시 작업 중...")
+        if fsm.transition_to(RunState.PLOT_GENERATION):
+            logger.info(f"[{run_id}] Plot regeneration requested, transitioning back to PLOT_GENERATION")
+
+            runs[run_id]["state"] = fsm.current_state.value
+
+            # Restart plan task
+            spec = runs[run_id]["spec"]
+            plan_task.delay(run_id, spec)
+            logger.info(f"[{run_id}] Plan task restarted for plot regeneration")
+
+            return {
+                "status": "success",
+                "message": "Plot regeneration started"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to transition to PLOT_GENERATION")
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to regenerate plot: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate plot: {str(e)}")
+
+
 @app.websocket("/ws/{run_id}")
 async def websocket_endpoint(websocket: WebSocket, run_id: str):
     """
