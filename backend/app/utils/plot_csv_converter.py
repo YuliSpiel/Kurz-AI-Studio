@@ -135,7 +135,7 @@ def save_plot_csv(run_id: str, plot_data: Dict, mode: str = "general") -> Path:
     Returns:
         Path to saved CSV file
     """
-    output_dir = Path(f"app/data/outputs/{run_id}")
+    output_dir = Path(f"app/data/outputs/{run_id}").resolve()  # Use absolute path
     output_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path = output_dir / "plot.csv"

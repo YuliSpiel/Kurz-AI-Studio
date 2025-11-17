@@ -21,7 +21,12 @@
       "Bash(python test_enhance.py:*)",
       "Bash(python:*)",
       "Bash(curl:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(celery:*)",
+      "Bash(npm run build:*)",
+      "Bash(lsof:*)",
+      "Bash(cat:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
