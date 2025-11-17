@@ -410,7 +410,9 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
     from celery import chord, group
     from app.utils.progress import publish_progress
 
-    if run_id not in runs:
+    # Check if run exists (either in memory or on filesystem)
+    output_dir = Path(f"app/data/outputs/{run_id}")
+    if run_id not in runs and not output_dir.exists():
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
     fsm = get_fsm(run_id)
@@ -424,12 +426,29 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
         )
 
     try:
+        import json
+
+        # Determine paths (from memory or filesystem)
+        if run_id in runs:
+            plot_json_path = runs[run_id]["artifacts"].get("plot_json_path")
+            characters_json_path = runs[run_id]["artifacts"].get("characters_path")
+            layout_json_path = runs[run_id]["artifacts"].get("json_path")
+            spec = runs[run_id].get("spec", {})
+        else:
+            # Fallback to filesystem
+            plot_json_path = output_dir / "plot.json"
+            characters_json_path = output_dir / "characters.json"
+            layout_json_path = output_dir / "layout.json"
+            # Try to load spec from layout.json if it exists
+            spec = {}
+            if layout_json_path.exists():
+                with open(layout_json_path, 'r', encoding='utf-8') as f:
+                    layout_data = json.load(f)
+                    spec = layout_data.get("spec", {})
+
         # If user edited plot, update plot.json and regenerate layout.json
         if request and "edited_plot" in request:
             edited_plot = request["edited_plot"]
-            import json
-
-            plot_json_path = runs[run_id]["artifacts"]["plot_json_path"]
 
             # Save edited plot.json
             with open(plot_json_path, 'w', encoding='utf-8') as f:
@@ -440,17 +459,17 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
             # Regenerate layout.json from updated plot.json
             from app.utils.json_converter import generate_layout
 
-            spec = runs[run_id]["spec"]
-            characters_json_path = runs[run_id]["artifacts"]["characters_path"]
-
             characters_data = None
             if Path(characters_json_path).exists():
                 with open(characters_json_path, 'r', encoding='utf-8') as f:
                     characters_data = json.load(f)
 
-            output_dir = Path(f"app/data/outputs/{run_id}")
             layout_path = generate_layout(edited_plot, characters_data, output_dir, spec)
-            runs[run_id]["artifacts"]["json_path"] = str(layout_path)
+
+            # Update runs if in memory
+            if run_id in runs:
+                runs[run_id]["artifacts"]["json_path"] = str(layout_path)
+
             logger.info(f"[{run_id}] Regenerated layout.json from edited plot")
 
         # Transition to ASSET_GENERATION
@@ -459,11 +478,12 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
             logger.info(f"[{run_id}] Plot confirmed, transitioning to ASSET_GENERATION")
             publish_progress(run_id, state="ASSET_GENERATION", progress=0.3, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
 
-            runs[run_id]["state"] = fsm.current_state.value
+            # Update state in memory if run exists
+            if run_id in runs:
+                runs[run_id]["state"] = fsm.current_state.value
 
-            # Start asset generation chord
-            json_path_str = runs[run_id]["artifacts"]["json_path"]
-            spec = runs[run_id]["spec"]
+            # Use layout_json_path from above (already determined)
+            json_path_str = str(layout_json_path)
 
             asset_tasks = group(
                 designer_task.s(run_id, json_path_str, spec),
