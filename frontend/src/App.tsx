@@ -38,6 +38,12 @@ function App() {
     setEnhancementData(null)
   }
 
+  const handleEditorMode = () => {
+    setShowDetailedForm(true)
+    setAppMode('general')
+    setEnhancementData(null)
+  }
+
   const handleHeroChatSubmit = (prompt: string, mode: 'general' | 'story' | 'ad') => {
     setAppMode(mode)
     setShowDetailedForm(true)
@@ -97,6 +103,7 @@ function App() {
               <p>가장 쉬운 숏폼 제작 플랫폼</p>
             </div>
             <div className="navbar-menu">
+              <a href="#" onClick={(e) => { e.preventDefault(); handleEditorMode(); }} className="navbar-menu-item">에디터 모드</a>
               <a href="#" className="navbar-menu-item">라이브러리</a>
               <a href="#" className="navbar-menu-item">캘린더</a>
               <a href="#" className="navbar-menu-item">커뮤니티</a>
