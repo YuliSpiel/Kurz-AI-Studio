@@ -601,11 +601,33 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
         # Parse and save plot JSON
         try:
             plot_data = json.loads(plot_json_content)
+            logger.info(f"✅ Successfully parsed plot JSON: {len(plot_data.get('scenes', []))} scenes")
         except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed: {e}")
-            logger.error(f"Raw JSON content (first 500 chars): {plot_json_content[:500]}")
-            logger.error(f"Raw JSON content (last 500 chars): {plot_json_content[-500:]}")
-            raise  # Re-raise to trigger fallback
+            logger.error(f"❌ JSON parsing failed at position {e.pos}: {e.msg}")
+            logger.error(f"Error at line {e.lineno}, column {e.colno}")
+            logger.error(f"Raw JSON content (first 500 chars):\n{plot_json_content[:500]}")
+            logger.error(f"Raw JSON content (last 500 chars):\n{plot_json_content[-500:]}")
+
+            # Try to fix common JSON errors
+            logger.info("Attempting to fix common JSON errors...")
+
+            # Fix 1: Remove trailing commas
+            fixed_content = plot_json_content.replace(",\n]", "\n]").replace(",\n}", "\n}")
+
+            # Fix 2: Ensure proper quote escaping
+            # (Gemini sometimes forgets to escape quotes in text fields)
+
+            try:
+                plot_data = json.loads(fixed_content)
+                logger.info("✅ Successfully parsed after fixing trailing commas")
+            except Exception as fix_error:
+                logger.error(f"❌ Still failed after fixes: {fix_error}")
+                # Save raw response for debugging
+                debug_path = Path(f"app/data/outputs/{run_id}") / "plot_raw_response.txt"
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    f.write(plot_response_text)
+                logger.error(f"Saved raw response to {debug_path} for debugging")
+                raise  # Re-raise original error
 
         # VALIDATION: Check if text/speaker fields are swapped (General/Ad Mode only)
         if mode in ["general", "ad"]:

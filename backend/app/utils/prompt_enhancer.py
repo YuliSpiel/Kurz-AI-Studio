@@ -55,34 +55,57 @@ IMPORTANT: suggested_num_characters should match the plot_outline (if dialogue b
     try:
         # Initialize Gemini client
         if not settings.GEMINI_API_KEY:
-            raise ValueError("No Gemini API key configured")
+            logger.error("[ENHANCE] No Gemini API key configured")
+            raise ValueError("Gemini API 키가 설정되지 않았습니다")
 
         client = GeminiLLMClient(api_key=settings.GEMINI_API_KEY)
 
-        # Call Gemini Flash
+        # Call Gemini Flash with retry logic
+        logger.info("[ENHANCE] Calling Gemini API for prompt enhancement...")
         response_text = client.generate_text(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=2000
+            max_tokens=2000,
+            max_retries=3
         )
 
-        logger.info(f"[ENHANCE] Raw LLM response: {response_text[:200]}...")
+        logger.info(f"[ENHANCE] Raw LLM response length: {len(response_text)} chars")
+        logger.debug(f"[ENHANCE] First 200 chars: {response_text[:200]}...")
 
         # Parse JSON response
         # Clean potential markdown code blocks
         cleaned_response = response_text.strip()
         if cleaned_response.startswith("```json"):
             cleaned_response = cleaned_response[7:]
-        if cleaned_response.startswith("```"):
+        elif cleaned_response.startswith("```"):
             cleaned_response = cleaned_response[3:]
         if cleaned_response.endswith("```"):
             cleaned_response = cleaned_response[:-3]
         cleaned_response = cleaned_response.strip()
 
-        result = json.loads(cleaned_response)
+        logger.debug(f"[ENHANCE] Cleaned response: {cleaned_response[:200]}...")
+
+        try:
+            result = json.loads(cleaned_response)
+            logger.info("[ENHANCE] ✅ Successfully parsed JSON response")
+        except json.JSONDecodeError as parse_error:
+            logger.error(f"[ENHANCE] ❌ JSON parsing failed: {parse_error}")
+            logger.error(f"[ENHANCE] Position: line {parse_error.lineno}, col {parse_error.colno}")
+            logger.error(f"[ENHANCE] Cleaned response (first 500 chars):\n{cleaned_response[:500]}")
+            logger.error(f"[ENHANCE] Cleaned response (last 500 chars):\n{cleaned_response[-500:]}")
+
+            # Try to fix common issues
+            logger.info("[ENHANCE] Attempting to fix JSON...")
+            fixed_response = cleaned_response.replace(",\n]", "\n]").replace(",\n}", "\n}")
+
+            try:
+                result = json.loads(fixed_response)
+                logger.info("[ENHANCE] ✅ Fixed and parsed JSON successfully")
+            except Exception:
+                raise ValueError(f"LLM 응답을 파싱할 수 없습니다: {parse_error}")
 
         # Validate fields
         required_fields = [
@@ -98,29 +121,34 @@ IMPORTANT: suggested_num_characters should match the plot_outline (if dialogue b
             "reasoning"
         ]
 
-        for field in required_fields:
-            if field not in result:
-                raise ValueError(f"Missing required field: {field}")
+        missing_fields = [field for field in required_fields if field not in result]
+        if missing_fields:
+            logger.error(f"[ENHANCE] ❌ Missing required fields: {missing_fields}")
+            raise ValueError(f"필수 필드 누락: {', '.join(missing_fields)}")
 
         # Validate ranges
-        result["suggested_num_cuts"] = max(1, min(10, int(result["suggested_num_cuts"])))
-        result["suggested_num_characters"] = max(1, min(3, int(result["suggested_num_characters"])))
+        try:
+            result["suggested_num_cuts"] = max(1, min(10, int(result["suggested_num_cuts"])))
+            result["suggested_num_characters"] = max(1, min(3, int(result["suggested_num_characters"])))
+        except (ValueError, TypeError) as e:
+            logger.error(f"[ENHANCE] ❌ Invalid numeric values: {e}")
+            raise ValueError("숫자 필드의 값이 올바르지 않습니다")
 
-        logger.info(f"[ENHANCE] Successfully enhanced prompt")
-        logger.info(f"[ENHANCE] Suggested title: '{result['suggested_title']}', "
+        logger.info("[ENHANCE] ✅ Successfully enhanced prompt")
+        logger.info(f"[ENHANCE] Title: '{result['suggested_title']}', "
                    f"cuts: {result['suggested_num_cuts']}, "
-                   f"characters: {result['suggested_num_characters']}, "
-                   f"art_style: '{result['suggested_art_style']}', "
+                   f"chars: {result['suggested_num_characters']}, "
+                   f"style: '{result['suggested_art_style']}', "
                    f"tone: '{result['suggested_narrative_tone']}', "
                    f"structure: '{result['suggested_plot_structure']}'")
 
         return result
 
-    except json.JSONDecodeError as e:
-        logger.error(f"[ENHANCE] Failed to parse JSON response: {e}")
-        logger.error(f"[ENHANCE] Raw response was: {response_text}")
-        raise ValueError(f"LLM returned invalid JSON: {e}")
+    except ValueError as e:
+        # Re-raise ValueError as-is (these are user-facing)
+        logger.error(f"[ENHANCE] ValueError: {e}")
+        raise
 
     except Exception as e:
-        logger.error(f"[ENHANCE] Failed to enhance prompt: {e}", exc_info=True)
-        raise
+        logger.error(f"[ENHANCE] ❌ Unexpected error: {e}", exc_info=True)
+        raise ValueError(f"프롬프트 분석 중 오류 발생: {str(e)}")

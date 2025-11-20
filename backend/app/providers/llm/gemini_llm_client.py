@@ -40,94 +40,132 @@ class GeminiLLMClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2000,
+        max_retries: int = 3
     ) -> str:
         """
-        Generate text using Gemini model.
+        Generate text using Gemini model with retry logic.
 
         Args:
             messages: List of message dicts with 'role' and 'content' keys
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens to generate
+            max_retries: Maximum number of retry attempts
 
         Returns:
             Generated text as string
 
         Raises:
-            Exception: If API call fails
+            Exception: If API call fails after all retries
         """
-        try:
-            # Combine system and user messages
-            # Gemini doesn't have explicit system role, so we prepend system message to user prompt
-            combined_prompt = ""
+        import time
 
-            for msg in messages:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
+        # Combine system and user messages
+        # Gemini doesn't have explicit system role, so we prepend system message to user prompt
+        combined_prompt = ""
 
-                if role == "system":
-                    combined_prompt += f"{content}\n\n"
-                elif role == "user":
-                    combined_prompt += f"{content}"
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
 
-            logger.info(f"[GEMINI] Generating text with temperature={temperature}, max_tokens={max_tokens}")
-            logger.debug(f"[GEMINI] Prompt length: {len(combined_prompt)} chars")
+            if role == "system":
+                combined_prompt += f"{content}\n\n"
+            elif role == "user":
+                combined_prompt += f"{content}"
 
-            # Generate content with safety settings
-            from google.generativeai.types import HarmCategory, HarmBlockThreshold
+        logger.info(f"[GEMINI] Generating text with temperature={temperature}, max_tokens={max_tokens}")
+        logger.debug(f"[GEMINI] Prompt length: {len(combined_prompt)} chars")
 
-            safety_settings = [
-                {
-                    "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                    "threshold": HarmBlockThreshold.BLOCK_NONE,
-                },
-                {
-                    "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                    "threshold": HarmBlockThreshold.BLOCK_NONE,
-                },
-                {
-                    "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    "threshold": HarmBlockThreshold.BLOCK_NONE,
-                },
-                {
-                    "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    "threshold": HarmBlockThreshold.BLOCK_NONE,
-                },
-            ]
+        # Generate content with safety settings
+        from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-            response = self.model.generate_content(
-                combined_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                ),
-                safety_settings=safety_settings,
-            )
+        safety_settings = [
+            {
+                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                "threshold": HarmBlockThreshold.BLOCK_NONE,
+            },
+            {
+                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                "threshold": HarmBlockThreshold.BLOCK_NONE,
+            },
+            {
+                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                "threshold": HarmBlockThreshold.BLOCK_NONE,
+            },
+            {
+                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                "threshold": HarmBlockThreshold.BLOCK_NONE,
+            },
+        ]
 
-            # Extract text from response
-            if not response.candidates:
-                raise ValueError("No candidates in response")
+        last_error = None
 
-            # Check for blocked responses
-            candidate = response.candidates[0]
-            finish_reason = candidate.finish_reason
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[GEMINI] Attempt {attempt + 1}/{max_retries}")
 
-            logger.debug(f"[GEMINI] Finish reason: {finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'})")
-            logger.debug(f"[GEMINI] Safety ratings: {candidate.safety_ratings}")
-
-            # finish_reason enum: 1=STOP (success), 2=MAX_TOKENS (hit limit), 3=SAFETY (blocked), 4=RECITATION, 5=OTHER
-            # Allow STOP (1) and MAX_TOKENS (2) - both provide usable content
-            if finish_reason not in [1, 2]:
-                raise ValueError(
-                    f"Response blocked with finish_reason={finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'}). "
-                    f"Safety ratings: {candidate.safety_ratings}"
+                response = self.model.generate_content(
+                    combined_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=temperature,
+                        max_output_tokens=max_tokens,
+                    ),
+                    safety_settings=safety_settings,
                 )
 
-            result_text = response.text
+                # Extract text from response
+                if not response.candidates:
+                    error_msg = "No candidates in response"
+                    logger.warning(f"[GEMINI] {error_msg}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    raise ValueError(error_msg)
 
-            logger.info(f"[GEMINI] Generated {len(result_text)} characters")
+                # Check for blocked responses
+                candidate = response.candidates[0]
+                finish_reason = candidate.finish_reason
 
-            return result_text
+                logger.debug(f"[GEMINI] Finish reason: {finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'})")
+                logger.debug(f"[GEMINI] Safety ratings: {candidate.safety_ratings}")
 
-        except Exception as e:
-            logger.error(f"[GEMINI] Error generating text: {e}", exc_info=True)
-            raise
+                # finish_reason enum: 1=STOP (success), 2=MAX_TOKENS (hit limit), 3=SAFETY (blocked), 4=RECITATION, 5=OTHER
+                # Allow STOP (1) and MAX_TOKENS (2) - both provide usable content
+                if finish_reason not in [1, 2]:
+                    error_msg = (
+                        f"Response blocked with finish_reason={finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'}). "
+                        f"Safety ratings: {candidate.safety_ratings}"
+                    )
+                    logger.warning(f"[GEMINI] {error_msg}")
+
+                    # If safety-blocked, retry with adjusted temperature
+                    if attempt < max_retries - 1:
+                        temperature = max(0.3, temperature - 0.2)  # Lower temperature
+                        logger.info(f"[GEMINI] Retrying with lower temperature: {temperature}")
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(error_msg)
+
+                result_text = response.text
+
+                if not result_text or len(result_text) < 50:
+                    error_msg = f"Generated text too short ({len(result_text)} chars)"
+                    logger.warning(f"[GEMINI] {error_msg}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(error_msg)
+
+                logger.info(f"[GEMINI] ✅ Generated {len(result_text)} characters successfully")
+                return result_text
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"[GEMINI] Attempt {attempt + 1} failed: {e}")
+
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.info(f"[GEMINI] Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"[GEMINI] All {max_retries} attempts failed")
+                    raise last_error
