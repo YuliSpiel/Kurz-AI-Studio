@@ -377,10 +377,38 @@ async def enhance_prompt_endpoint(request: dict):
         return result
     except ValueError as e:
         logger.error(f"[ENHANCE] Validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+
+        # Return fallback response instead of failing completely
+        logger.warning(f"[ENHANCE] Returning fallback response due to error")
+        return {
+            "enhanced_prompt": original_prompt,
+            "suggested_title": original_prompt[:30] if len(original_prompt) > 30 else original_prompt,
+            "suggested_plot_outline": f"{original_prompt}에 대한 간단한 영상을 만듭니다.",
+            "suggested_num_cuts": 3,
+            "suggested_art_style": "일러스트",
+            "suggested_music_genre": "밝고 경쾌한 음악",
+            "suggested_num_characters": 1,
+            "suggested_narrative_tone": "친근한반말",
+            "suggested_plot_structure": "기승전결",
+            "reasoning": f"AI 분석 실패로 기본값 사용: {str(e)}"
+        }
     except Exception as e:
         logger.error(f"[ENHANCE] Failed to enhance prompt: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"프롬프트 분석 실패: {str(e)}")
+
+        # Return fallback response instead of 500 error
+        logger.warning(f"[ENHANCE] Returning fallback response due to unexpected error")
+        return {
+            "enhanced_prompt": original_prompt,
+            "suggested_title": original_prompt[:30] if len(original_prompt) > 30 else original_prompt,
+            "suggested_plot_outline": f"{original_prompt}에 대한 간단한 영상을 만듭니다.",
+            "suggested_num_cuts": 3,
+            "suggested_art_style": "일러스트",
+            "suggested_music_genre": "밝고 경쾌한 음악",
+            "suggested_num_characters": 1,
+            "suggested_narrative_tone": "친근한반말",
+            "suggested_plot_structure": "기승전결",
+            "reasoning": f"시스템 오류로 기본값 사용: {str(e)[:100]}"
+        }
 
 
 @app.get("/api/v1/runs/{run_id}/plot-json")
