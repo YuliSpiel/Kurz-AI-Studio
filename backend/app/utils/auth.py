@@ -99,3 +99,38 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_optional_current_user(
+    db: AsyncSession = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False))
+) -> User | None:
+    """
+    FastAPI dependency to get current user if authenticated, None otherwise.
+    This allows endpoints to work both with and without authentication.
+
+    Args:
+        credentials: HTTP Authorization header with Bearer token (optional)
+        db: Database session
+
+    Returns:
+        User object if authenticated, None otherwise
+    """
+    if credentials is None:
+        return None
+
+    token = credentials.credentials
+    payload = verify_token(token)
+
+    if payload is None:
+        return None
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+
+    # Fetch user from database
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+
+    return user

@@ -36,6 +36,8 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
   const [isEnhancing, setIsEnhancing] = useState(false)
   const [enhancementResult, setEnhancementResult] = useState<PromptEnhancementResult | null>(null)
   const [showEnhancementModal, setShowEnhancementModal] = useState(false)
+  const [showEnhanceErrorModal, setShowEnhanceErrorModal] = useState(false)
+  const [enhanceError, setEnhanceError] = useState<string>('')
 
   // Editable enhancement values
   const [editedTitle, setEditedTitle] = useState('')
@@ -153,34 +155,31 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
       setShowEnhancementModal(true)
       setIsEnhancing(true)
 
-      let lastError: any = null
-      const maxRetries = 3 // 초기 1번 + 재시도 2번
+      try {
+        console.log('[ENHANCE] Requesting AI analysis...')
+        const result = await enhancePrompt(prompt, 'general')
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          console.log(`[ENHANCE] Attempt ${attempt}/${maxRetries}...`)
-          const result = await enhancePrompt(prompt, 'general')
-          setEnhancementResult(result)
-          setIsEnhancing(false)
-          return // 성공하면 종료
-        } catch (error: any) {
-          console.error(`[ENHANCE] Attempt ${attempt} failed:`, error)
-          lastError = error
-
-          if (attempt < maxRetries) {
-            // 재시도 전 2초 대기
-            console.log(`[ENHANCE] Retrying in 2 seconds...`)
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
+        // Check if this is a fallback response (contains error message in reasoning)
+        if (result.reasoning && (result.reasoning.includes('AI 분석 실패') || result.reasoning.includes('시스템 오류'))) {
+          console.warn('[ENHANCE] Received fallback response from backend:', result.reasoning)
+          // Still show the result - backend already provided fallback values
         }
+
+        setEnhancementResult(result)
+        setIsEnhancing(false)
+        return // 성공
+      } catch (error: any) {
+        console.error('[ENHANCE] Network or parse error:', error)
+
+        // Network completely failed - backend didn't respond
+        // This should be very rare since backend has its own fallback
+        setIsEnhancing(false)
+        setShowEnhancementModal(false)
+
+        // Show error modal instead of alert
+        setEnhanceError(error?.message || String(error))
+        setShowEnhanceErrorModal(true)
       }
-
-      // 모든 시도 실패
-      setIsEnhancing(false)
-      setShowEnhancementModal(false)
-
-      const errorMessage = lastError?.message || String(lastError) || '알 수 없는 오류'
-      alert(`프롬프트 분석에 ${maxRetries}번 실패했습니다.\n\n에러: ${errorMessage}\n\nGemini API가 일시적으로 불안정할 수 있습니다.\n잠시 후 다시 시도하거나 다른 프롬프트를 입력해주세요.`)
     } else {
       // For story/ad modes, proceed directly
       onSubmit(prompt, selectedMode)
@@ -1112,6 +1111,142 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
                     </div>
                   </>
                 ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enhancement Error Modal */}
+      {showEnhanceErrorModal && (
+        <div className="enhancement-modal-overlay">
+          <div className="enhancement-modal-container" style={{ maxWidth: '500px' }}>
+            <div style={{ padding: '32px' }}>
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  backgroundColor: '#FEE2E2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 16px'
+                }}>
+                  <span style={{ fontSize: '32px' }}>⚠️</span>
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+                  AI 풍부화 실패
+                </h3>
+                <p style={{ fontSize: '14px', color: '#6B7280', lineHeight: '1.5' }}>
+                  프롬프트 분석 중 오류가 발생했습니다
+                </p>
+              </div>
+
+              <div style={{
+                backgroundColor: '#FEF2F2',
+                border: '1px solid #FCA5A5',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                marginBottom: '24px'
+              }}>
+                <p style={{
+                  fontSize: '13px',
+                  color: '#991B1B',
+                  fontFamily: 'monospace',
+                  wordBreak: 'break-word'
+                }}>
+                  {enhanceError}
+                </p>
+              </div>
+
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                <button
+                  onClick={() => {
+                    setShowEnhanceErrorModal(false)
+                    handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 24px',
+                    backgroundColor: '#6f9fa0',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#5a8385'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#6f9fa0'}
+                >
+                  🔄 다시 시도
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowEnhanceErrorModal(false)
+                    // Show enhancement modal with default values for manual input
+                    setEnhancementResult({
+                      enhanced_prompt: prompt,
+                      suggested_title: prompt,
+                      suggested_plot_outline: prompt,
+                      suggested_num_cuts: 5,
+                      suggested_num_characters: 1,
+                      suggested_art_style: '일러스트',
+                      suggested_music_genre: 'upbeat',
+                      suggested_narrative_tone: '격식형',
+                      suggested_plot_structure: '기승전결',
+                      reasoning: '수동 입력 모드'
+                    })
+                    setShowEnhancementModal(true)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 24px',
+                    backgroundColor: '#FFFFFF',
+                    color: '#6f9fa0',
+                    border: '2px solid #6f9fa0',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#F9FAFB'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#FFFFFF'
+                  }}
+                >
+                  ✏️ 직접 입력
+                </button>
+
+                <button
+                  onClick={() => setShowEnhanceErrorModal(false)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 24px',
+                    backgroundColor: 'transparent',
+                    color: '#6B7280',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  취소
+                </button>
               </div>
             </div>
           </div>

@@ -160,13 +160,18 @@ class FFmpegRenderer:
             fill=self.title_bg_color
         )
 
-        # Draw title text (left-aligned, multi-line)
+        # Draw title text (center-aligned, multi-line)
         current_y = padding_top
         for line in title_lines:
+            # Calculate centered x position for each line
+            bbox = title_font.getbbox(line)
+            text_width = bbox[2] - bbox[0]
+            x_centered = (self.width - text_width) // 2
+
             self._draw_text_with_stroke(
                 draw,
                 line,
-                (padding_left, current_y),
+                (x_centered, current_y),
                 title_font,
                 fill_color=(255, 255, 255),
                 stroke_color=(0, 0, 0),
@@ -416,27 +421,25 @@ class FFmpegRenderer:
         concat_file = self.output_dir / "concat.txt"
         with open(concat_file, "w") as f:
             for frame_path, duration in frame_info:
-                f.write(f"file '{frame_path}'\n")
+                # Use absolute path to avoid path resolution issues
+                abs_frame_path = frame_path.resolve()
+                f.write(f"file '{abs_frame_path}'\n")
                 f.write(f"duration {duration}\n")
             # Repeat last frame to ensure it's included
             if frame_info:
                 last_frame, _ = frame_info[-1]
-                f.write(f"file '{last_frame}'\n")
+                abs_last_frame = last_frame.resolve()
+                f.write(f"file '{abs_last_frame}'\n")
 
         logger.info(f"[{self.run_id}] Created concat file: {concat_file}")
 
-        # Build FFmpeg command
+        # Build FFmpeg command (input section)
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output
             "-f", "concat",
             "-safe", "0",
             "-i", str(concat_file),
-            "-r", str(self.fps),
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-preset", "medium",
-            "-crf", "23"
         ]
 
         # Collect audio files
@@ -484,7 +487,7 @@ class FFmpegRenderer:
                 audio_streams.append(f"[v{audio_idx}]")
                 audio_idx += 1
 
-        # Mix all audio streams
+        # Mix all audio streams and add output encoding options
         if audio_streams:
             num_streams = len(audio_streams)
             mix_inputs = "".join(audio_streams)
@@ -494,12 +497,27 @@ class FFmpegRenderer:
                 "-filter_complex", ";".join(filter_complex_parts),
                 "-map", "0:v",
                 "-map", "[aout]",
+                # Video encoding options (MUST come after -map)
+                "-r", str(self.fps),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "medium",
+                "-crf", "23",
+                # Audio encoding options
                 "-c:a", "aac",
                 "-b:a", "192k"
             ])
         else:
-            # No audio
-            cmd.extend(["-map", "0:v"])
+            # No audio - video only
+            cmd.extend([
+                "-map", "0:v",
+                # Video encoding options (MUST come after -map)
+                "-r", str(self.fps),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "medium",
+                "-crf", "23"
+            ])
 
         cmd.append(str(output_path))
 

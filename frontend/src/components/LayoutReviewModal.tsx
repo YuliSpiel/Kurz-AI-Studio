@@ -26,6 +26,37 @@ export default function LayoutReviewModal({ runId, onClose }: LayoutReviewModalP
     loadLayoutConfig()
   }, [runId])
 
+  // Load fonts dynamically when fonts list changes
+  useEffect(() => {
+    if (fonts.length === 0) return
+
+    // Create @font-face rules for all custom fonts
+    const fontFaceRules = fonts
+      .filter(font => !font.id.startsWith('Apple')) // Skip system fonts
+      .map(font => `
+        @font-face {
+          font-family: '${font.id}';
+          src: url('/api/fonts/${font.id}') format('truetype');
+          font-weight: normal;
+          font-style: normal;
+        }
+      `)
+      .join('\n')
+
+    // Inject font-face rules into a style tag
+    const styleId = 'dynamic-fonts'
+    let styleElement = document.getElementById(styleId) as HTMLStyleElement
+
+    if (!styleElement) {
+      styleElement = document.createElement('style')
+      styleElement.id = styleId
+      document.head.appendChild(styleElement)
+    }
+
+    styleElement.textContent = fontFaceRules
+    console.log(`[LAYOUT PREVIEW] Loaded ${fonts.length} fonts`)
+  }, [fonts])
+
   const loadLayoutConfig = async () => {
     setIsLoading(true)
     try {
@@ -239,7 +270,7 @@ export default function LayoutReviewModal({ runId, onClose }: LayoutReviewModalP
                     }}>
                       <span style={{
                         color: 'white',
-                        fontSize: `${config.title_font_size / 3.86}px`,
+                        fontSize: `${config.title_font_size / 4.32}px`,
                         fontFamily: config.title_font,
                         fontWeight: 'bold',
                         whiteSpace: 'pre-wrap',
@@ -271,7 +302,7 @@ export default function LayoutReviewModal({ runId, onClose }: LayoutReviewModalP
                       backgroundColor: '#ffffff'
                     }}>
                       <span style={{
-                        fontSize: `${config.subtitle_font_size / 3.86}px`,
+                        fontSize: `${config.subtitle_font_size / 4.32}px`,
                         fontFamily: config.subtitle_font,
                         color: 'black',
                         fontWeight: 'bold',

@@ -162,7 +162,7 @@ export async function enhancePrompt(
   originalPrompt: string,
   mode: string = 'general'
 ): Promise<PromptEnhancementResult> {
-  const response = await fetch(`${API_BASE}/v1/enhance-prompt`, {
+  const response = await fetch('/api/v1/enhance-prompt', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -174,10 +174,14 @@ export async function enhancePrompt(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to enhance prompt: ${response.statusText}`)
+    const errorText = await response.text()
+    console.error('[ENHANCE API] Error response:', response.status, errorText)
+    throw new Error(`Failed to enhance prompt (${response.status}): ${response.statusText}`)
   }
 
-  return response.json()
+  const result = await response.json()
+  console.log('[ENHANCE API] Success:', result)
+  return result
 }
 
 export interface Character {

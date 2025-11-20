@@ -30,7 +30,7 @@ from app.schemas.run_spec import RunSpec, RunStatus
 from app.orchestrator.fsm import FSM, RunState
 from app.utils.logger import setup_logger
 from app.utils.fonts import get_available_fonts
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, get_optional_current_user
 from app.routers import auth, runs as runs_router
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,13 +169,13 @@ async def root():
 @app.post("/api/runs", response_model=RunStatus)
 async def create_run(
     spec: RunSpec,
-    current_user = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_optional_current_user)
 ):
     """
     Create a new shorts generation run.
     Initializes FSM and kicks off Celery orchestration.
-    Requires authentication.
+    Authentication is optional (works for both guest and authenticated users).
     """
     from app.celery_app import celery
     from app.tasks.plan import plan_task
@@ -190,7 +190,12 @@ async def create_run(
     prompt_clean = "".join(c for c in spec.prompt if c.isalnum())[:8]
     run_id = f"{timestamp}_{prompt_clean}"
 
-    logger.info(f"[DEBUG] Received run request from user {current_user.username} ({current_user.id}):")
+    # Log user info (handle both authenticated and guest users)
+    if current_user:
+        logger.info(f"[DEBUG] Received run request from user {current_user.username} ({current_user.id}):")
+    else:
+        logger.info(f"[DEBUG] Received run request from guest user:")
+
     logger.info(f"[DEBUG]   mode='{spec.mode}'")
     logger.info(f"[DEBUG]   num_cuts={spec.num_cuts}")
     logger.info(f"[DEBUG]   num_characters={spec.num_characters}")
@@ -198,20 +203,23 @@ async def create_run(
     logger.info(f"[DEBUG]   review_mode={spec.review_mode}")
     logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
 
-    # Save run to database
-    db_run = RunModel(
-        run_id=run_id,
-        user_id=current_user.id,
-        mode=RunMode(spec.mode),
-        prompt=spec.prompt,
-        num_cuts=spec.num_cuts,
-        num_characters=spec.num_characters,
-        state=DBRunState.IDLE,
-        progress=0,
-    )
-    db.add(db_run)
-    await db.commit()
-    logger.info(f"[{run_id}] Saved to database with user_id={current_user.id}")
+    # Save run to database (only if user is authenticated)
+    if current_user:
+        db_run = RunModel(
+            run_id=run_id,
+            user_id=current_user.id,
+            mode=RunMode(spec.mode),
+            prompt=spec.prompt,
+            num_cuts=spec.num_cuts,
+            num_characters=spec.num_characters,
+            state=DBRunState.IDLE,
+            progress=0,
+        )
+        db.add(db_run)
+        await db.commit()
+        logger.info(f"[{run_id}] Saved to database with user_id={current_user.id}")
+    else:
+        logger.info(f"[{run_id}] Guest user - skipping database save")
 
     # Initialize FSM
     fsm = FSM(run_id)
@@ -231,7 +239,7 @@ async def create_run(
         "logs": [],
         "created_at": None,  # Add timestamp in production
         "mode": spec.mode,  # Add mode for easy access
-        "user_id": str(current_user.id),  # Store user_id in memory
+        "user_id": str(current_user.id) if current_user else None,  # Store user_id in memory (None for guests)
     }
 
     logger.info(f"[{run_id}] Added to runs dict. Total runs: {len(runs)}")
