@@ -4,6 +4,46 @@
 
 const API_BASE = '/api'
 
+// ============ Auth Types ============
+export interface RegisterRequest {
+  email: string
+  username: string
+  password: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface UserResponse {
+  id: string
+  email: string
+  username: string
+  credits: number
+  subscription_tier: string
+  created_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+  user: UserResponse
+}
+
+// ============ Library Types ============
+export interface RunListItem {
+  id: string
+  run_id: string
+  prompt: string
+  mode: string
+  state: string
+  progress: number
+  video_url: string | null
+  thumbnail_url: string | null
+  created_at: string
+}
+
 interface CharacterInput {
   name: string
   gender: 'male' | 'female' | 'other'
@@ -43,10 +83,13 @@ interface RunStatus {
 }
 
 export async function createRun(spec: RunSpec): Promise<RunStatus> {
+  const token = localStorage.getItem('auth_token')
+
   const response = await fetch(`${API_BASE}/runs`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
     },
     body: JSON.stringify(spec),
   })
@@ -192,5 +235,145 @@ export async function regeneratePlot(runId: string): Promise<void> {
 
   if (!response.ok) {
     throw new Error(`Failed to regenerate plot: ${response.statusText}`)
+  }
+}
+
+export async function confirmLayout(runId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-confirm`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to confirm layout: ${response.statusText}`)
+  }
+}
+
+export async function regenerateLayout(runId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-regenerate`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to regenerate layout: ${response.statusText}`)
+  }
+}
+
+export interface LayoutConfig {
+  use_title_block: boolean
+  title_bg_color: string
+  title_font_size: number
+  subtitle_font_size: number
+  title_font: string
+  subtitle_font: string
+}
+
+export interface LayoutConfigData {
+  run_id: string
+  layout_config: LayoutConfig
+  title: string
+}
+
+export async function getLayoutConfig(runId: string): Promise<LayoutConfigData> {
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-config`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to get layout config: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export async function confirmLayoutWithConfig(runId: string, layoutConfig?: LayoutConfig): Promise<void> {
+  const body = layoutConfig ? { layout_config: layoutConfig } : {}
+
+  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-confirm`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to confirm layout: ${response.statusText}`)
+  }
+}
+
+// ============ Auth API Functions ============
+
+export async function register(data: RegisterRequest): Promise<UserResponse> {
+  const response = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Registration failed')
+  }
+
+  return response.json()
+}
+
+export async function login(data: LoginRequest): Promise<TokenResponse> {
+  const response = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Login failed')
+  }
+
+  return response.json()
+}
+
+// ============ Library API Functions ============
+
+export async function getMyRuns(): Promise<RunListItem[]> {
+  const token = localStorage.getItem('auth_token')
+
+  if (!token) {
+    throw new Error('Not authenticated')
+  }
+
+  const response = await fetch(`${API_BASE}/runs`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Failed to fetch runs')
+  }
+
+  return response.json()
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+
+  if (!token) {
+    throw new Error('Not authenticated')
+  }
+
+  const response = await fetch(`${API_BASE}/runs/${runId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Failed to delete run')
   }
 }

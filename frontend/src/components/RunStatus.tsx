@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getRun } from '../api/client'
 import PlotReviewModal from './PlotReviewModal'
+import LayoutReviewModal from './LayoutReviewModal'
 
 interface RunStatusProps {
   runId: string
@@ -12,6 +13,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
   const [status, setStatus] = useState<any>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [showPlotReview, setShowPlotReview] = useState(false)
+  const [assetAnimFrame, setAssetAnimFrame] = useState(1)
 
   useEffect(() => {
     // Initial status fetch
@@ -91,6 +93,17 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     }
   }, [runId, onCompleted])
 
+  // Asset generation animation
+  useEffect(() => {
+    if (status?.state === 'ASSET_GENERATION') {
+      const animInterval = setInterval(() => {
+        setAssetAnimFrame((prev) => (prev % 8) + 1)
+      }, 150) // 150ms per frame = ~6.7 fps
+
+      return () => clearInterval(animInterval)
+    }
+  }, [status?.state])
+
   if (!status) {
     return <div className="status-loading">로딩 중...</div>
   }
@@ -103,7 +116,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
       <div className="enhancement-modal-overlay">
         <div className="enhancement-modal-container">
           <div className="enhancement-modal-layout">
-            {/* Left: Stepper - All 5 steps completed */}
+            {/* Left: Stepper - All 6 steps completed */}
             <div className="enhancement-stepper">
               <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '24px', color: '#111827' }}>
                 제작 단계
@@ -163,7 +176,25 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
                 </div>
 
-                {/* Step 3: 영상 합성 (Completed) */}
+                {/* Step 3: 레이아웃 설정 (Completed) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
+                      <path d="M19.7071 6.29289C20.0976 6.68342 20.0976 7.31658 19.7071 7.70711L9.70711 17.7071C9.31658 18.0976 8.68342 18.0976 8.29289 17.7071L4.29289 13.7071C3.90237 13.3166 3.90237 12.6834 4.29289 12.2929C4.68342 11.9024 5.31658 11.9024 5.70711 12.2929L9 15.5858L18.2929 6.29289C18.6834 5.90237 19.3166 5.90237 19.7071 6.29289Z"/>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      레이아웃 설정
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      완료됨
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
+                </div>
+
+                {/* Step 4: 영상 합성 (Completed) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
@@ -181,7 +212,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
                 </div>
 
-                {/* Step 4: 품질 검수 (Completed) */}
+                {/* Step 5: 품질 검수 (Completed) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '0px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
@@ -226,7 +257,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                 {status.artifacts?.video_url && (
                   <div style={{
                     width: '100%',
-                    maxWidth: '500px',
+                    maxWidth: '280px',
                     marginBottom: '24px',
                     borderRadius: '12px',
                     overflow: 'hidden',
@@ -369,7 +400,25 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
                 </div>
 
-                {/* Step 3: 영상 합성 (Active) */}
+                {/* Step 3: 레이아웃 설정 (Completed) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
+                      <path d="M19.7071 6.29289C20.0976 6.68342 20.0976 7.31658 19.7071 7.70711L9.70711 17.7071C9.31658 18.0976 8.68342 18.0976 8.29289 17.7071L4.29289 13.7071C3.90237 13.3166 3.90237 12.6834 4.29289 12.2929C4.68342 11.9024 5.31658 11.9024 5.70711 12.2929L9 15.5858L18.2929 6.29289C18.6834 5.90237 19.3166 5.90237 19.7071 6.29289Z"/>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      레이아웃 설정
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      완료됨
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
+                </div>
+
+                {/* Step 4: 영상 합성 (Active) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#6f9fa0', border: '2px solid #6f9fa0', boxShadow: '0 0 0 4px rgba(111, 159, 160, 0.1)' }}>
                     <div className="enhancement-step-spinner"></div>
@@ -385,7 +434,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
                 </div>
 
-                {/* Step 4: 품질 검수 (Pending) */}
+                {/* Step 5: 품질 검수 (Pending) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '0px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
                   </div>
@@ -556,7 +605,25 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
                 </div>
 
-                {/* Step 3: 영상 합성 (Completed) */}
+                {/* Step 3: 레이아웃 설정 (Completed) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
+                      <path d="M19.7071 6.29289C20.0976 6.68342 20.0976 7.31658 19.7071 7.70711L9.70711 17.7071C9.31658 18.0976 8.68342 18.0976 8.29289 17.7071L4.29289 13.7071C3.90237 13.3166 3.90237 12.6834 4.29289 12.2929C4.68342 11.9024 5.31658 11.9024 5.70711 12.2929L9 15.5858L18.2929 6.29289C18.6834 5.90237 19.3166 5.90237 19.7071 6.29289Z"/>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      레이아웃 설정
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      완료됨
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
+                </div>
+
+                {/* Step 4: 영상 합성 (Completed) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
@@ -574,7 +641,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
                 </div>
 
-                {/* Step 4: 품질 검수 (Active) */}
+                {/* Step 5: 품질 검수 (Active) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '0px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#6f9fa0', border: '2px solid #6f9fa0', boxShadow: '0 0 0 4px rgba(111, 159, 160, 0.1)' }}>
                     <div className="enhancement-step-spinner"></div>
@@ -744,7 +811,22 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
                 </div>
 
-                {/* Step 3: 영상 합성 (Pending) */}
+                {/* Step 3: 레이아웃 설정 (Pending) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      레이아웃 설정
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      제목 블록과 폰트를 설정합니다
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
+                </div>
+
+                {/* Step 4: 영상 합성 (Pending) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
                   </div>
@@ -759,7 +841,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                   <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
                 </div>
 
-                {/* Step 4: 품질 검수 (Pending) */}
+                {/* Step 5: 품질 검수 (Pending) */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '0px' }}>
                   <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
                   </div>
@@ -777,11 +859,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
 
             {/* Right: Content - 에셋 생성 진행 상황 */}
             <div className="enhancement-content">
-              <div className="enhancement-content-header">
-                <h3 className="enhancement-modal-title">🎨 에셋 생성 중...</h3>
-              </div>
-
-              {/* TODO: 나중에 애니메이션으로 교체 */}
+              {/* Animation */}
               <div style={{
                 flex: 1,
                 display: 'flex',
@@ -790,7 +868,15 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
                 justifyContent: 'center',
                 padding: '40px 20px'
               }}>
-                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🎨</div>
+                <img
+                  src={`/animations/2_composer/composeanim_0${assetAnimFrame}.png`}
+                  alt="Asset generation animation"
+                  style={{
+                    width: '300px',
+                    height: 'auto',
+                    marginBottom: '24px'
+                  }}
+                />
                 <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', marginBottom: '12px' }}>
                   에셋을 생성하고 있습니다
                 </h3>
@@ -861,6 +947,19 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
           </div>
         </div>
       </div>
+    )
+  }
+
+  // LAYOUT_REVIEW 상태일 때 레이아웃 설정 모달 표시
+  if (status.state === 'LAYOUT_REVIEW') {
+    return (
+      <LayoutReviewModal
+        runId={runId}
+        onClose={() => {
+          // Refresh status after modal close
+          getRun(runId).then(setStatus)
+        }}
+      />
     )
   }
 
@@ -944,6 +1043,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
           }}
         />
       )}
+
     </>
   )
 }

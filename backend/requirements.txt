@@ -65,3 +65,11 @@ vine==5.1.0
 watchfiles==1.1.1
 wcwidth==0.2.14
 websockets==15.0.1
+
+# Database & Auth
+SQLAlchemy==2.0.23
+alembic==1.13.0
+asyncpg==0.29.0
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+bcrypt==4.1.2

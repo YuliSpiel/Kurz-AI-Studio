@@ -339,7 +339,6 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
         scenes: scenes
       } : undefined
       await confirmPlot(currentRunId, editedPlotData)
-      alert('플롯이 확정되었습니다. 에셋 생성이 시작됩니다.')
 
       // Notify parent and close modal
       if (onRunCreated) {
@@ -988,30 +987,6 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
 
                     <div className="enhancement-grid">
                       <div className="enhancement-grid-item">
-                        <label className="enhancement-grid-label">컷 수</label>
-                        <input
-                          type="number"
-                          className="enhancement-input-small"
-                          value={editedNumCuts}
-                          onChange={(e) => setEditedNumCuts(parseInt(e.target.value) || 3)}
-                          min="1"
-                          max="20"
-                        />
-                      </div>
-
-                      <div className="enhancement-grid-item">
-                        <label className="enhancement-grid-label">캐릭터 수</label>
-                        <input
-                          type="number"
-                          className="enhancement-input-small"
-                          value={editedNumCharacters}
-                          onChange={(e) => setEditedNumCharacters(parseInt(e.target.value) || 1)}
-                          min="1"
-                          max="5"
-                        />
-                      </div>
-
-                      <div className="enhancement-grid-item">
                         <label className="enhancement-grid-label">화풍</label>
                         <input
                           type="text"
@@ -1040,12 +1015,12 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
                           value={editedNarrativeTone}
                           onChange={(e) => setEditedNarrativeTone(e.target.value)}
                         >
-                          <option value="격식형">격식형 (-입니다체) - 뉴스, 해설, 교육</option>
-                          <option value="서술형">서술형 (-함.체) - 요약, 정보전달</option>
-                          <option value="친근한반말">친근한 반말 (-거야, -지?) - 광고, 추천</option>
-                          <option value="진지한나레이션">진지한 나레이션체 - 스토리, 다큐</option>
-                          <option value="감정강조">감정 강조형 - 리액션, 감정 몰입</option>
-                          <option value="코믹풍자">코믹/풍자형 - 병맛, 밈 기반</option>
+                          <option value="격식형">-입니다</option>
+                          <option value="서술형">-함/-임</option>
+                          <option value="친근한반말">-야/ -지?</option>
+                          <option value="진지한나레이션">진지한 나레이션</option>
+                          <option value="감정강조">감정 풍부</option>
+                          <option value="코믹풍자">병맛/밈</option>
                         </select>
                       </div>
 
@@ -1056,14 +1031,14 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
                           value={editedPlotStructure}
                           onChange={(e) => setEditedPlotStructure(e.target.value)}
                         >
-                          <option value="기승전결">고전적 기승전결 - 스토리텔링, 교육</option>
-                          <option value="고구마사이다">고구마-사이다형 - 답답함→반전 해결</option>
-                          <option value="3막구조">3막 구조 (시작-위기-해결) - 간결한 내러티브</option>
-                          <option value="비교형">비교형 (Before-After) - 변화 강조</option>
-                          <option value="반전형">반전형 (Twist Ending) - 밈, 코믹, 리액션</option>
-                          <option value="정보나열">정보 나열형 (Listicle) - 트렌드 요약</option>
-                          <option value="감정곡선">감정 곡선형 - 공감→위로→희망</option>
-                          <option value="질문형">질문형 오프닝 - 호기심 유발</option>
+                          <option value="기승전결">고전적 기승전결</option>
+                          <option value="고구마사이다">고구마-사이다형</option>
+                          <option value="3막구조">3막 : 시작-위기-해결</option>
+                          <option value="비교형">Before-After</option>
+                          <option value="반전형">반전형</option>
+                          <option value="정보나열">정보 나열형</option>
+                          <option value="감정곡선">감정 곡선 : 공감→위로→희망</option>
+                          <option value="질문형">질문형 오프닝</option>
                         </select>
                       </div>
                     </div>
@@ -1123,7 +1098,7 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
                         >
                           검수 모드
                         </button>
-                        <span className="enhancement-tooltip">상세 폼에서 추가 설정을 조정할 수 있습니다</span>
+                        <span className="enhancement-tooltip">플롯을 검토하고 수정할 수 있습니다</span>
                       </div>
                       <div className="enhancement-btn-wrapper">
                         <button

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8080
     FRONTEND_ORIGIN: str = "http://localhost:5173"
 
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://localhost/kurz_studio"
+
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
@@ -41,6 +44,11 @@ class Settings(BaseSettings):
     ART_STYLE_LORA: str = "WatercolorDream_v2"
     BASE_CHAR_SEED: int = 1001
     BG_SEED_BASE: int = 2000
+
+    # Auth
+    JWT_SECRET_KEY: str = "your-secret-key-change-this-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # External API keys
     OPENAI_API_KEY: str = ""

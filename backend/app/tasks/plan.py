@@ -135,10 +135,12 @@ def _validate_plot_json(run_id: str, plot_json_path: Path, layout_json_path: Pat
         prompt = spec.get("prompt", "")
         all_texts = [scene.get("text", "") for scene in plot_data["scenes"]]
 
-        # Check for fallback pattern: "{prompt}의 N번째 장면입니다"
+        # Check for fallback pattern: "장면 N" (new short fallback)
         fallback_pattern_count = 0
         for text in all_texts:
-            if "번째 장면입니다" in text or f"{prompt}의" in text or f'"{prompt}의' in text:
+            text_stripped = text.strip().strip('"\'')
+            # Detect "장면 1", "장면 2", etc. (exactly matching pattern)
+            if text_stripped.startswith("장면 ") and len(text_stripped) <= 10:
                 fallback_pattern_count += 1
 
         if fallback_pattern_count > 0:
@@ -245,7 +247,8 @@ def plan_task(self, run_id: str, spec: dict):
             art_style=spec.get("art_style", "파스텔 수채화"),
             music_genre=spec.get("music_genre", "ambient"),
             video_title=spec.get("video_title"),
-            layout_config=spec.get("layout_config")
+            layout_config=spec.get("layout_config"),
+            review_mode=spec.get("review_mode", False)
         )
         logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
         publish_progress(run_id, progress=0.2, log=f"기획자: 레이아웃 JSON 생성 완료")

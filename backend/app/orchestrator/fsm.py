@@ -1,8 +1,8 @@
 """
 Finite State Machine (FSM) for AutoShorts orchestration.
-Manages state transitions: INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GENERATION → RENDERING → QA → END
-                                        ↑                ↓ (재생성)                                  ↓ Fail
-                                        └────────────────┘                                   PLOT_GENERATION (재시도)
+Manages state transitions: INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GENERATION → LAYOUT_REVIEW → RENDERING → QA → END
+                                        ↑                ↓ (재생성)           ↑            ↓ (재생성)                    ↓ Fail
+                                        └────────────────┘                    └────────────┘               PLOT_GENERATION (재시도)
 """
 import logging
 from enum import Enum
@@ -17,6 +17,7 @@ class RunState(Enum):
     PLOT_GENERATION = "PLOT_GENERATION"  # Director: 플롯 생성
     PLOT_REVIEW = "PLOT_REVIEW"  # User: 플롯 검수 및 수정
     ASSET_GENERATION = "ASSET_GENERATION"  # Voice/Painter/Composer
+    LAYOUT_REVIEW = "LAYOUT_REVIEW"  # User: 레이아웃 검수 및 확인
     RENDERING = "RENDERING"  # Director: 영상 합성
     QA = "QA"  # QA Agent: 품질 검수
     END = "END"
@@ -28,9 +29,9 @@ class FSM:
     Finite State Machine for orchestrating shorts generation workflow.
 
     State transitions:
-    INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GENERATION → RENDERING → QA → END
-              ↑                   ↓ (재생성)                                  ↓
-              └───────────────────┘                                   PLOT_GENERATION (재시도)
+    INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GENERATION → LAYOUT_REVIEW → RENDERING → QA → END
+              ↑                   ↓ (재생성)           ↑            ↓ (재생성)                    ↓
+              └───────────────────┘                    └────────────┘               PLOT_GENERATION (재시도)
     """
 
     # Valid state transitions
@@ -38,7 +39,8 @@ class FSM:
         RunState.INIT: [RunState.PLOT_GENERATION, RunState.FAILED],
         RunState.PLOT_GENERATION: [RunState.PLOT_REVIEW, RunState.ASSET_GENERATION, RunState.FAILED],  # Review mode → PLOT_REVIEW, Auto mode → ASSET
         RunState.PLOT_REVIEW: [RunState.ASSET_GENERATION, RunState.PLOT_GENERATION, RunState.FAILED],  # Confirm → ASSET, Regenerate → PLOT
-        RunState.ASSET_GENERATION: [RunState.RENDERING, RunState.FAILED],
+        RunState.ASSET_GENERATION: [RunState.LAYOUT_REVIEW, RunState.RENDERING, RunState.FAILED],  # General/Ad → RENDERING, Story → LAYOUT_REVIEW
+        RunState.LAYOUT_REVIEW: [RunState.RENDERING, RunState.ASSET_GENERATION, RunState.FAILED],  # Confirm → RENDERING, Regenerate → ASSET
         RunState.RENDERING: [RunState.QA, RunState.FAILED],
         RunState.QA: [RunState.END, RunState.PLOT_GENERATION, RunState.FAILED],  # Pass → END, Fail → 재시도
         RunState.END: [],

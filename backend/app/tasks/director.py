@@ -14,15 +14,171 @@ from app.utils.fonts import get_font_path
 logger = logging.getLogger(__name__)
 
 
+@celery.task(bind=True, name="tasks.layout_ready")
+def layout_ready_task(self, asset_results: list, run_id: str, json_path: str):
+    """
+    Chord callback after asset generation completes.
+    Updates layout.json with asset URLs and transitions to LAYOUT_REVIEW.
+
+    Args:
+        asset_results: List of results from parallel tasks (designer, composer, voice)
+        run_id: Run identifier
+        json_path: Path to layout.json
+
+    Returns:
+        Dict with status
+    """
+    logger.info(f"[{run_id}] Layout ready: All assets generated")
+    logger.info(f"[{run_id}] Asset results: {asset_results}")
+    publish_progress(run_id, progress=0.6, log="에셋 생성 완료 - 레이아웃 검수 대기 중...")
+
+    try:
+        # Load layout.json
+        with open(json_path, "r", encoding="utf-8") as f:
+            layout = json.load(f)
+
+        # Update layout.json with asset URLs from chord results
+        logger.info(f"[{run_id}] Updating layout.json with asset URLs from chord results...")
+
+        for result in asset_results:
+            if not result or "agent" not in result:
+                continue
+
+            agent = result["agent"]
+
+            # Update image URLs from designer
+            if agent == "designer" and "images" in result:
+                for img_result in result["images"]:
+                    scene_id = img_result["scene_id"]
+                    slot_id = img_result["slot_id"]
+                    image_url = img_result["image_url"]
+
+                    # Find scene and update image_url
+                    for scene in layout.get("scenes", []):
+                        if scene["scene_id"] == scene_id:
+                            for img_slot in scene.get("images", []):
+                                if img_slot["slot_id"] == slot_id:
+                                    img_slot["image_url"] = image_url
+                                    logger.info(f"[{run_id}] Updated {scene_id}/{slot_id} -> {image_url}")
+
+            # Update audio URLs from voice agent
+            elif agent == "voice" and "voice" in result:
+                for audio_result in result["voice"]:
+                    scene_id = audio_result["scene_id"]
+                    line_id = audio_result["line_id"]
+                    audio_url = audio_result["audio_url"]
+
+                    # Find scene and update audio_url
+                    for scene in layout.get("scenes", []):
+                        if scene["scene_id"] == scene_id:
+                            for text_line in scene.get("texts", []):
+                                if text_line.get("line_id") == line_id:
+                                    text_line["audio_url"] = audio_url
+                                    logger.info(f"[{run_id}] Updated {scene_id}/{line_id} -> {audio_url}")
+
+            # Update global BGM from composer
+            elif agent == "composer" and "audio" in result:
+                # Composer returns audio results in "audio" key
+                audio_results = result["audio"]
+                for audio_item in audio_results:
+                    if audio_item.get("type") == "bgm" and audio_item.get("id") == "global_bgm":
+                        bgm_url = audio_item.get("path")
+                        if bgm_url:
+                            if "global_bgm" not in layout or layout["global_bgm"] is None:
+                                layout["global_bgm"] = {}
+                            layout["global_bgm"]["audio_url"] = bgm_url
+                            logger.info(f"[{run_id}] Updated global BGM -> {bgm_url}")
+
+        # Save updated layout.json
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(layout, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"[{run_id}] layout.json updated with all asset URLs")
+
+        # Check mode from layout.json
+        mode = layout.get("metadata", {}).get("mode", "general")
+
+        # Get review_mode from run spec or layout metadata (fallback)
+        from app.main import runs
+        review_mode = False
+        if run_id in runs:
+            spec = runs[run_id].get("spec", {})
+            review_mode = spec.get("review_mode", False)
+
+        # Fallback to metadata if not found in spec
+        if not review_mode:
+            review_mode = layout.get("metadata", {}).get("review_mode", False)
+
+        logger.info(f"[{run_id}] Mode={mode}, review_mode={review_mode}")
+
+        from app.orchestrator.fsm import get_fsm
+        fsm = get_fsm(run_id)
+
+        # Only skip layout review for general/ad modes when review_mode=False (auto-generation)
+        # If review_mode=True (검수 모드), user wants to review layout for all modes
+        if mode in ["general", "ad"] and not review_mode:
+            logger.info(f"[{run_id}] Mode={mode}, skipping LAYOUT_REVIEW, going directly to RENDERING")
+            if fsm and fsm.transition_to(RunState.RENDERING):
+                logger.info(f"[{run_id}] Transitioned to RENDERING")
+                publish_progress(
+                    run_id,
+                    state="RENDERING",
+                    progress=0.7,
+                    log="영상 합성 시작..."
+                )
+
+                if run_id in runs:
+                    runs[run_id]["state"] = fsm.current_state.value
+                    runs[run_id]["progress"] = 0.7
+
+                # Trigger director task immediately
+                logger.info(f"[{run_id}] Triggering director_task for immediate rendering")
+                director_task.delay(run_id, json_path)
+
+            return {
+                "status": "success",
+                "message": "Assets generated, starting video composition",
+                "run_id": run_id
+            }
+
+        # For story mode OR when review_mode=True, go to LAYOUT_REVIEW
+        else:
+            if fsm and fsm.transition_to(RunState.LAYOUT_REVIEW):
+                logger.info(f"[{run_id}] Transitioned to LAYOUT_REVIEW")
+                publish_progress(
+                    run_id,
+                    state="LAYOUT_REVIEW",
+                    progress=0.65,
+                    log="레이아웃 검수 단계 - 사용자 확인 대기 중"
+                )
+
+                if run_id in runs:
+                    runs[run_id]["state"] = fsm.current_state.value
+                    runs[run_id]["progress"] = 0.65
+
+            return {
+                "status": "success",
+                "message": "Assets generated, waiting for layout review",
+                "run_id": run_id
+            }
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed in layout_ready_task: {e}", exc_info=True)
+        from app.orchestrator.fsm import get_fsm
+        fsm = get_fsm(run_id)
+        if fsm:
+            fsm.fail(f"Layout ready task failed: {str(e)}")
+        raise
+
+
 @celery.task(bind=True, name="tasks.director")
-def director_task(self, asset_results: list, run_id: str, json_path: str):
+def director_task(self, run_id: str, json_path: str):
     """
     Compose final 9:16 video from all generated assets.
 
-    This task is called as a chord callback after designer, composer, and voice tasks complete.
+    This task is called directly after layout confirmation (not as chord callback anymore).
 
     Args:
-        asset_results: List of results from parallel tasks
         run_id: Run identifier
         json_path: Path to JSON layout with all asset URLs
 
@@ -30,7 +186,6 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         Dict with final video URL
     """
     logger.info(f"[{run_id}] Director: Starting video composition...")
-    logger.info(f"[{run_id}] Asset results: {asset_results}")
     publish_progress(run_id, progress=0.7, log="감독: 최종 영상 합성 시작...")
 
     # TEST: 3초 대기
@@ -75,72 +230,8 @@ def director_task(self, asset_results: list, run_id: str, json_path: str):
         logger.info(f"[{run_id}] Title font: {title_font_id} -> {title_font_path}")
         logger.info(f"[{run_id}] Subtitle font: {subtitle_font_id} -> {subtitle_font_path}")
 
-        # IMPORTANT: Update layout.json with asset URLs from chord results
-        # This fixes race condition where parallel tasks overwrite each other's changes
-        logger.info(f"[{run_id}] Updating layout.json with asset URLs from chord results...")
-
-        for result in asset_results:
-            if not result or "agent" not in result:
-                continue
-
-            agent = result["agent"]
-
-            # Update image URLs from designer
-            if agent == "designer" and "images" in result:
-                for img_result in result["images"]:
-                    scene_id = img_result["scene_id"]
-                    slot_id = img_result["slot_id"]
-                    image_url = img_result["image_url"]
-
-                    # Find scene and update image_url
-                    for scene in layout.get("scenes", []):
-                        if scene["scene_id"] == scene_id:
-                            for img_slot in scene.get("images", []):
-                                if img_slot["slot_id"] == slot_id:
-                                    img_slot["image_url"] = image_url
-                                    logger.info(f"[{run_id}] Updated {scene_id}/{slot_id}: {image_url}")
-
-            # Update audio URLs from voice
-            elif agent == "voice" and "voice" in result:
-                for voice_result in result["voice"]:
-                    scene_id = voice_result["scene_id"]
-                    line_id = voice_result["line_id"]
-                    audio_url = voice_result["audio_url"]
-
-                    # Find scene and text line, update audio_url
-                    for scene in layout.get("scenes", []):
-                        if scene["scene_id"] == scene_id:
-                            for text_line in scene.get("texts", []):
-                                if text_line["line_id"] == line_id:
-                                    text_line["audio_url"] = audio_url
-                                    logger.info(f"[{run_id}] Updated {scene_id}/{line_id}: {audio_url}")
-
-            # Update BGM from composer
-            elif agent == "composer" and "audio" in result:
-                for audio_result in result["audio"]:
-                    if audio_result["type"] == "bgm":
-                        bgm_path = audio_result["path"]
-                        # Create global_bgm if it doesn't exist
-                        if not layout.get("global_bgm"):
-                            layout["global_bgm"] = {
-                                "bgm_id": audio_result.get("id", "global_bgm"),
-                                "genre": "ambient",
-                                "mood": "cinematic",
-                                "audio_url": bgm_path,
-                                "start_ms": 0,
-                                "duration_ms": layout.get("timeline", {}).get("total_duration_ms", 30000),
-                                "volume": 0.5
-                            }
-                            logger.info(f"[{run_id}] Created global BGM entry: {bgm_path}")
-                        else:
-                            layout["global_bgm"]["audio_url"] = bgm_path
-                            logger.info(f"[{run_id}] Updated global BGM: {bgm_path}")
-
-        # Save updated layout.json
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(layout, f, indent=2, ensure_ascii=False)
-
-        logger.info(f"[{run_id}] Layout JSON updated with all asset URLs")
+        # layout.json should already be updated with asset URLs by layout_ready_task
+        logger.info(f"[{run_id}] Using layout.json with pre-populated asset URLs from layout_ready_task")
 
         # Check if we're in stub mode (no real assets)
         from app.config import settings

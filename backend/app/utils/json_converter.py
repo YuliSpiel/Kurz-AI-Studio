@@ -18,7 +18,8 @@ def convert_plot_to_json(
     art_style: str = "파스텔 수채화",
     music_genre: str = "ambient",
     video_title: str = None,
-    layout_config: dict = None
+    layout_config: dict = None,
+    review_mode: bool = False
 ) -> Path:
     """
     Convert plot.json and characters.json to final layout.json.
@@ -30,6 +31,7 @@ def convert_plot_to_json(
         music_genre: Music genre for BGM
         video_title: User-specified video title
         layout_config: Layout customization settings (title_bg_color, fonts, etc.)
+        review_mode: Whether user wants to review at each stage
 
     Returns:
         Path to generated layout.json file
@@ -381,6 +383,10 @@ def convert_plot_to_json(
     if layout_config:
         metadata_dict["layout_config"] = layout_config
         logger.info(f"Added layout_config to metadata: {layout_config}")
+
+    # Add review_mode to metadata
+    metadata_dict["review_mode"] = review_mode
+    logger.info(f"Added review_mode to metadata: {review_mode}")
 
     # Determine mode from schema detection
     mode_value = "story" if is_story_mode else "general"

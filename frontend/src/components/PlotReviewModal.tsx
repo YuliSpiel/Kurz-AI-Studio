@@ -30,7 +30,7 @@ export default function PlotReviewModal({ runId, onClose, onConfirmed }: PlotRev
   const loadPlotJson = async () => {
     setIsLoading(true)
     let retries = 0
-    const maxRetries = 10 // 최대 10초 대기 (1초 간격)
+    const maxRetries = 60 // 최대 60초 대기 (1초 간격) - Plot 생성에 30-40초 소요
 
     while (retries < maxRetries) {
       try {
@@ -63,7 +63,6 @@ export default function PlotReviewModal({ runId, onClose, onConfirmed }: PlotRev
         scenes: scenes
       } : undefined
       await confirmPlot(runId, editedPlot)
-      alert('플롯이 확정되었습니다. 에셋 생성이 시작됩니다.')
       onConfirmed()
       onClose()
     } catch (error) {

@@ -732,7 +732,7 @@ def _generate_fallback(
                 "char2_expression": None,
                 "char2_pose": None,
                 "speaker": char_id,
-                "text": f"{prompt}의 {i+1}번째 장면입니다.",
+                "text": f"장면 {i+1}",
                 "text_type": "dialogue",
                 "emotion": "neutral" if i % 2 == 0 else "happy",
                 "subtitle_position": "top",
@@ -748,7 +748,7 @@ def _generate_fallback(
                 scenes.append({
                     "scene_id": scene_id,
                     "image_prompt": f"{prompt} 관련 배경 이미지",
-                    "text": f"이것은 {prompt}에 대한 이야기입니다.",
+                    "text": f"장면 {i+1}",
                     "speaker": "narration",
                     "duration_ms": 5000
                 })
@@ -756,7 +756,7 @@ def _generate_fallback(
                 scenes.append({
                     "scene_id": scene_id,
                     "image_prompt": f"캐릭터가 등장하는 장면, {prompt} 배경",
-                    "text": f'"{prompt}의 {i+1}번째 장면입니다."',
+                    "text": f"장면 {i+1}",
                     "speaker": char_id,
                     "duration_ms": 5000
                 })

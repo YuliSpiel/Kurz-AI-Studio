@@ -29,7 +29,19 @@
       "Bash(git rm:*)",
       "Bash(find:*)",
       "Bash(uvicorn:*)",
-      "Bash(redis-cli:*)"
+      "Bash(redis-cli:*)",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/createdb:*)",
+      "Bash(alembic init:*)",
+      "Bash(./kvenv/bin/python:*)",
+      "Bash(./kvenv/bin/pip install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(./kvenv/bin/alembic revision:*)",
+      "Bash(./kvenv/bin/alembic upgrade:*)",
+      "Bash(backend/kvenv/bin/alembic upgrade head)",
+      "Bash(/Users/yuli/Documents/01.AI_Workspace/Kurz_Studio_AI/backend/kvenv/bin/alembic upgrade:*)",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/psql:*)",
+      "Bash(./kvenv/bin/celery:*)",
+      "Bash(./kvenv/bin/pip:*)"
     ],
     "deny": [],
     "ask": []

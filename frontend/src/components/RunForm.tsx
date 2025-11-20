@@ -638,25 +638,7 @@ export default function RunForm({ onRunCreated, enhancementData }: RunFormProps)
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-              <div>
-                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
-                  컷 수
-                </label>
-                <div style={{ fontSize: '18px', fontWeight: '600', color: '#7C3AED' }}>
-                  {enhancementResult.suggested_num_cuts}개
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
-                  캐릭터 수
-                </label>
-                <div style={{ fontSize: '18px', fontWeight: '600', color: '#10B981' }}>
-                  {enhancementResult.suggested_num_characters}명
-                </div>
-              </div>
-
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
               <div>
                 <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '4px', fontSize: '13px', color: '#6B7280' }}>
                   화풍

@@ -30,6 +30,10 @@ from app.schemas.run_spec import RunSpec, RunStatus
 from app.orchestrator.fsm import FSM, RunState
 from app.utils.logger import setup_logger
 from app.utils.fonts import get_available_fonts
+from app.utils.auth import get_current_user
+from app.routers import auth, runs as runs_router
+from app.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Setup logging
 setup_logger()
@@ -146,6 +150,10 @@ app.add_middleware(
 # Mount static files for generated videos
 app.mount("/outputs", StaticFiles(directory="app/data/outputs"), name="outputs")
 
+# Include routers
+app.include_router(auth.router, prefix="/api")
+app.include_router(runs_router.router, prefix="/api")
+
 
 @app.get("/")
 async def root():
@@ -159,29 +167,51 @@ async def root():
 
 
 @app.post("/api/runs", response_model=RunStatus)
-async def create_run(spec: RunSpec):
+async def create_run(
+    spec: RunSpec,
+    current_user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Create a new shorts generation run.
     Initializes FSM and kicks off Celery orchestration.
+    Requires authentication.
     """
     from app.celery_app import celery
     from app.tasks.plan import plan_task
+    from app.models.run import Run as RunModel, RunMode, RunState as DBRunState
     import uuid
 
     # 폴더명으로 사용할 run_id 생성: 타임스탬프_프롬프트첫8글자
     from datetime import datetime
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    prompt_clean = "".join(c for c in spec.prompt if not c.isspace())[:8]
+    # 한글, 영문, 숫자만 남기고 특수문자 제거
+    prompt_clean = "".join(c for c in spec.prompt if c.isalnum())[:8]
     run_id = f"{timestamp}_{prompt_clean}"
 
-    logger.info(f"[DEBUG] Received run request:")
+    logger.info(f"[DEBUG] Received run request from user {current_user.username} ({current_user.id}):")
     logger.info(f"[DEBUG]   mode='{spec.mode}'")
     logger.info(f"[DEBUG]   num_cuts={spec.num_cuts}")
     logger.info(f"[DEBUG]   num_characters={spec.num_characters}")
     logger.info(f"[DEBUG]   characters={'YES (' + str(len(spec.characters)) + ' chars)' if spec.characters else 'NO'}")
     logger.info(f"[DEBUG]   review_mode={spec.review_mode}")
     logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
+
+    # Save run to database
+    db_run = RunModel(
+        run_id=run_id,
+        user_id=current_user.id,
+        mode=RunMode(spec.mode),
+        prompt=spec.prompt,
+        num_cuts=spec.num_cuts,
+        num_characters=spec.num_characters,
+        state=DBRunState.IDLE,
+        progress=0,
+    )
+    db.add(db_run)
+    await db.commit()
+    logger.info(f"[{run_id}] Saved to database with user_id={current_user.id}")
 
     # Initialize FSM
     fsm = FSM(run_id)
@@ -201,6 +231,7 @@ async def create_run(spec: RunSpec):
         "logs": [],
         "created_at": None,  # Add timestamp in production
         "mode": spec.mode,  # Add mode for easy access
+        "user_id": str(current_user.id),  # Store user_id in memory
     }
 
     logger.info(f"[{run_id}] Added to runs dict. Total runs: {len(runs)}")
@@ -435,7 +466,7 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
     from app.tasks.designer import designer_task
     from app.tasks.composer import composer_task
     from app.tasks.voice import voice_task
-    from app.tasks.director import director_task
+    from app.tasks.director import layout_ready_task
     from celery import chord, group
     from app.utils.progress import publish_progress
 
@@ -542,7 +573,8 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
                 art_style=spec.get("art_style", "파스텔 수채화"),
                 music_genre=spec.get("music_genre", "ambient"),
                 video_title=spec.get("video_title"),
-                layout_config=spec.get("layout_config")
+                layout_config=spec.get("layout_config"),
+                review_mode=spec.get("review_mode", False)
             )
 
             # Update runs if in memory
@@ -570,8 +602,8 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
                 voice_task.s(run_id, json_path_str, spec),
             )
 
-            workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
-            logger.info(f"[{run_id}] Asset generation chord started")
+            workflow = chord(asset_tasks)(layout_ready_task.s(run_id, json_path_str))
+            logger.info(f"[{run_id}] Asset generation chord started (will transition to LAYOUT_REVIEW)")
 
             return {
                 "status": "success",
@@ -636,6 +668,247 @@ async def regenerate_plot(run_id: str):
     except Exception as e:
         logger.error(f"[{run_id}] Failed to regenerate plot: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to regenerate plot: {str(e)}")
+
+
+@app.get("/api/v1/runs/{run_id}/layout-config")
+async def get_layout_config(run_id: str):
+    """
+    Get current layout configuration from layout.json.
+
+    Response:
+        {
+            "run_id": "abc123",
+            "layout_config": {
+                "use_title_block": true,
+                "title_bg_color": "#323296",
+                "title_font_size": 100,
+                "subtitle_font_size": 80,
+                "title_font": "AppleGothic",
+                "subtitle_font": "AppleGothic"
+            },
+            "title": "Project Title"
+        }
+    """
+    logger.info(f"[{run_id}] layout-config requested")
+
+    # Try to get layout_json_path from runs dict if available
+    layout_json_path = None
+
+    if run_id in runs:
+        layout_json_path = runs[run_id]["artifacts"].get("json_path")
+
+    # Fallback: construct path from run_id
+    if not layout_json_path:
+        layout_json_path = Path(f"app/data/outputs/{run_id}/layout.json").resolve()
+        logger.info(f"[{run_id}] Using fallback path: {layout_json_path}")
+
+    # Check if file exists
+    if not Path(layout_json_path).exists():
+        raise HTTPException(status_code=404, detail=f"Layout JSON not found for run {run_id}")
+
+    try:
+        import json
+        layout_content = json.loads(Path(layout_json_path).read_text(encoding="utf-8"))
+
+        layout_config = layout_content.get("metadata", {}).get("layout_config", {})
+        title = layout_content.get("title", "")
+
+        # Add defaults if not present
+        if not layout_config:
+            layout_config = {
+                "use_title_block": True,
+                "title_bg_color": "#323296",
+                "title_font_size": 100,
+                "subtitle_font_size": 80,
+                "title_font": "AppleGothic",
+                "subtitle_font": "AppleGothic"
+            }
+
+        logger.info(f"[{run_id}] Successfully loaded layout config")
+        return {
+            "run_id": run_id,
+            "layout_config": layout_config,
+            "title": title
+        }
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to load layout config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load layout config: {str(e)}")
+
+
+@app.post("/api/v1/runs/{run_id}/layout-confirm")
+async def confirm_layout(run_id: str, request: Dict = Body(default={})):
+    """
+    Confirm layout and proceed to video rendering.
+    Optionally accepts updated layout_config.
+
+    Request Body (optional):
+        {
+            "layout_config": {
+                "use_title_block": true,
+                "title_bg_color": "#323296",
+                "title_font_size": 100,
+                "subtitle_font_size": 80,
+                "title_font": "AppleGothic",
+                "subtitle_font": "AppleGothic"
+            }
+        }
+
+    Response:
+        {
+            "status": "success",
+            "message": "Layout confirmed, proceeding to rendering"
+        }
+    """
+    from app.orchestrator.fsm import get_fsm, RunState
+    from app.tasks.director import director_task
+    from app.utils.progress import publish_progress
+
+    # Check if run exists (either in memory or on filesystem)
+    output_dir = Path(f"app/data/outputs/{run_id}")
+    if run_id not in runs and not output_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    # CRITICAL: Clear in-memory cache to force reload from Redis
+    from app.orchestrator.fsm import _fsm_registry
+    if run_id in _fsm_registry:
+        del _fsm_registry[run_id]
+        logger.info(f"[{run_id}] Cleared FSM from memory cache to force Redis reload")
+
+    fsm = get_fsm(run_id)
+    if not fsm:
+        raise HTTPException(status_code=404, detail=f"FSM not found for run {run_id}")
+
+    if fsm.current_state != RunState.LAYOUT_REVIEW:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot confirm layout: current state is {fsm.current_state.value}, expected LAYOUT_REVIEW"
+        )
+
+    try:
+        import json
+
+        # Determine paths (from memory or filesystem)
+        if run_id in runs:
+            layout_json_path = runs[run_id]["artifacts"].get("json_path")
+            if layout_json_path is None:
+                layout_json_path = output_dir / "layout.json"
+        else:
+            layout_json_path = output_dir / "layout.json"
+
+        if not Path(layout_json_path).exists():
+            raise HTTPException(status_code=404, detail=f"Layout JSON not found for run {run_id}")
+
+        # If user updated layout_config, save it to layout.json
+        if request and "layout_config" in request:
+            updated_config = request["layout_config"]
+
+            # Load current layout.json
+            with open(layout_json_path, 'r', encoding='utf-8') as f:
+                layout_data = json.load(f)
+
+            # Update layout_config in metadata
+            if "metadata" not in layout_data:
+                layout_data["metadata"] = {}
+            layout_data["metadata"]["layout_config"] = updated_config
+
+            # Save updated layout.json
+            with open(layout_json_path, 'w', encoding='utf-8') as f:
+                json.dump(layout_data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"[{run_id}] Updated layout_config in layout.json: {updated_config}")
+
+        # Transition to RENDERING
+        publish_progress(run_id, progress=0.65, log="레이아웃 확정 - 영상 합성 시작...")
+        if fsm.transition_to(RunState.RENDERING):
+            logger.info(f"[{run_id}] Layout confirmed, transitioning to RENDERING")
+            publish_progress(run_id, state="RENDERING", progress=0.7, log="영상 합성 시작 (감독)")
+
+            # Update state in memory if run exists
+            if run_id in runs:
+                runs[run_id]["state"] = fsm.current_state.value
+
+            # Start rendering task
+            director_task.delay(run_id, str(layout_json_path))
+            logger.info(f"[{run_id}] Director task started for rendering")
+
+            return {
+                "status": "success",
+                "message": "Layout confirmed, proceeding to rendering"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to transition to RENDERING")
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to confirm layout: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to confirm layout: {str(e)}")
+
+
+@app.post("/api/v1/runs/{run_id}/layout-regenerate")
+async def regenerate_layout(run_id: str):
+    """
+    Regenerate assets (images, audio, music) if user rejects layout.
+
+    Response:
+        {
+            "status": "success",
+            "message": "Asset regeneration started"
+        }
+    """
+    from app.orchestrator.fsm import get_fsm, RunState
+    from app.tasks.designer import designer_task
+    from app.tasks.composer import composer_task
+    from app.tasks.voice import voice_task
+    from app.tasks.director import layout_ready_task
+    from celery import chord, group
+    from app.utils.progress import publish_progress
+
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    fsm = get_fsm(run_id)
+    if not fsm:
+        raise HTTPException(status_code=404, detail=f"FSM not found for run {run_id}")
+
+    if fsm.current_state != RunState.LAYOUT_REVIEW:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot regenerate layout: current state is {fsm.current_state.value}, expected LAYOUT_REVIEW"
+        )
+
+    try:
+        # Transition back to ASSET_GENERATION
+        publish_progress(run_id, progress=0.3, log="레이아웃 재생성 요청 - 에셋 다시 생성 중...")
+        if fsm.transition_to(RunState.ASSET_GENERATION):
+            logger.info(f"[{run_id}] Layout regeneration requested, transitioning back to ASSET_GENERATION")
+
+            runs[run_id]["state"] = fsm.current_state.value
+
+            # Get paths and spec
+            output_dir = Path(f"app/data/outputs/{run_id}")
+            layout_json_path = runs[run_id]["artifacts"].get("json_path") or output_dir / "layout.json"
+            spec = runs[run_id].get("spec", {})
+
+            # Restart asset generation chord
+            asset_tasks = group(
+                designer_task.s(run_id, str(layout_json_path), spec),
+                composer_task.s(run_id, str(layout_json_path), spec),
+                voice_task.s(run_id, str(layout_json_path), spec),
+            )
+
+            workflow = chord(asset_tasks)(layout_ready_task.s(run_id, str(layout_json_path)))
+            logger.info(f"[{run_id}] Asset generation chord restarted for layout regeneration")
+
+            return {
+                "status": "success",
+                "message": "Asset regeneration started"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to transition to ASSET_GENERATION")
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Failed to regenerate layout: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate layout: {str(e)}")
 
 
 @app.websocket("/ws/{run_id}")
