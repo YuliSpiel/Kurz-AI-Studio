@@ -41,7 +41,8 @@
       "Bash(/Users/yuli/Documents/01.AI_Workspace/Kurz_Studio_AI/backend/kvenv/bin/alembic upgrade:*)",
       "Bash(/opt/homebrew/opt/postgresql@16/bin/psql:*)",
       "Bash(./kvenv/bin/celery:*)",
-      "Bash(./kvenv/bin/pip:*)"
+      "Bash(./kvenv/bin/pip:*)",
+      "Bash(xargs kill -9)"
     ],
     "deny": [],
     "ask": []

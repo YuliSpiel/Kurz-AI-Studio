@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { createRun, uploadReferenceImage, getAvailableFonts, Font, enhancePrompt, PromptEnhancementResult } from '../api/client'
+import { createRun, uploadReferenceImage, getAvailableFonts, Font, enhancePrompt, PromptEnhancementResult, AuthenticationError } from '../api/client'
 
 interface RunFormProps {
   onRunCreated: (runId: string, reviewMode?: boolean) => void
+  onAuthRequired: () => void
   enhancementData?: {
     enhancement: PromptEnhancementResult
     originalPrompt: string
   } | null
 }
 
-export default function RunForm({ onRunCreated, enhancementData }: RunFormProps) {
+export default function RunForm({ onRunCreated, onAuthRequired, enhancementData }: RunFormProps) {
   const mode = 'general' // Fixed to general mode
   const [prompt, setPrompt] = useState('')
   const [numCuts, setNumCuts] = useState(3)
@@ -152,7 +153,11 @@ export default function RunForm({ onRunCreated, enhancementData }: RunFormProps)
       onRunCreated(result.run_id, reviewMode)
     } catch (error) {
       console.error('Failed to create run:', error)
-      alert('Run 생성 실패: ' + error)
+      if (error instanceof AuthenticationError) {
+        onAuthRequired()
+      } else {
+        alert('Run 생성 실패: ' + error)
+      }
     } finally {
       setIsSubmitting(false)
       setIsSubmittingReview(false)

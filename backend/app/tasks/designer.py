@@ -41,6 +41,61 @@ def _is_stub_image(image_path: Path) -> bool:
         return True  # Treat as stub if we can't check
 
 
+def _cleanup_unused_images(run_id: str, layout: dict, json_path: str):
+    """
+    Delete image files that were generated but are not actually referenced in layout.json.
+    This happens when an image was generated for a scene that should have reused a previous image.
+
+    Args:
+        run_id: Run identifier
+        layout: Layout JSON data
+        json_path: Path to layout.json
+    """
+    try:
+        output_dir = Path(json_path).parent
+
+        # Collect all image URLs referenced in layout.json
+        referenced_images = set()
+        for scene in layout.get("scenes", []):
+            for img_slot in scene.get("images", []):
+                image_url = img_slot.get("image_url", "")
+                if image_url:
+                    # Convert to absolute path for comparison
+                    if not Path(image_url).is_absolute():
+                        image_url = str(output_dir / image_url)
+                    referenced_images.add(Path(image_url).resolve())
+
+        logger.info(f"[{run_id}] Cleanup: Found {len(referenced_images)} referenced images in layout.json")
+
+        # Find all generated image files in the output directory
+        generated_images = []
+        for pattern in ["scene_*.png", "scene_*.jpg", "bg_*.png", "bg_*.jpg", "char_*.png", "char_*.jpg"]:
+            generated_images.extend(output_dir.glob(pattern))
+
+        logger.info(f"[{run_id}] Cleanup: Found {len(generated_images)} generated image files")
+
+        # Delete images that are not referenced
+        deleted_count = 0
+        for img_path in generated_images:
+            img_path_resolved = img_path.resolve()
+            if img_path_resolved not in referenced_images:
+                try:
+                    img_path.unlink()
+                    logger.info(f"[{run_id}] Cleanup: Deleted unused image: {img_path.name}")
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"[{run_id}] Cleanup: Failed to delete {img_path.name}: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"[{run_id}] Cleanup: Deleted {deleted_count} unused image(s)")
+        else:
+            logger.info(f"[{run_id}] Cleanup: No unused images to delete")
+
+    except Exception as e:
+        logger.warning(f"[{run_id}] Cleanup failed: {e}")
+        # Don't raise - cleanup failure should not block the pipeline
+
+
 @celery.task(bind=True, name="tasks.designer")
 def designer_task(self, run_id: str, json_path: str, spec: dict):
     """
@@ -164,6 +219,26 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                 slot_id = img_slot["slot_id"]
                 img_type = img_type = img_slot["type"]
 
+                # CRITICAL: Check if image_url is already populated by json_converter
+                # This happens when plot.json has image_prompt="" and json_converter copied the previous URL
+                existing_image_url = img_slot.get("image_url", "")
+                if existing_image_url:
+                    logger.info(f"[{run_id}] Image already provided by json_converter for {scene_id}/{slot_id}: {existing_image_url}")
+                    logger.info(f"[{run_id}] Skipping image generation - using pre-populated URL")
+                    image_results.append({
+                        "scene_id": scene_id,
+                        "slot_id": slot_id,
+                        "image_url": existing_image_url
+                    })
+                    # Update cache for next scenes
+                    if img_type == "scene":
+                        cached_scene = existing_image_url
+                        cached_scene_prompt = img_slot.get("image_prompt", "")
+                    elif img_type == "background":
+                        cached_background = existing_image_url
+                        cached_background_prompt = img_slot.get("image_prompt", "")
+                    continue  # Skip generation entirely
+
                 # Check for background reuse (Story Mode)
                 if img_type == "background" and "image_prompt" in img_slot:
                     base_prompt = img_slot.get("image_prompt", "")
@@ -194,20 +269,9 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                 if img_type == "scene" and "image_prompt" in img_slot:
                     base_prompt = img_slot.get("image_prompt", "")
 
-                    # Reuse scene if:
-                    # 1. Empty string (explicit reuse request), OR
-                    # 2. Same prompt as previously cached scene
+                    # Reuse scene if empty prompt (explicit reuse signal from plot.json)
                     if base_prompt == "" and cached_scene:
-                        logger.info(f"[{run_id}] Reusing previous scene image (empty prompt) for {scene_id}")
-                        img_slot["image_url"] = cached_scene
-                        image_results.append({
-                            "scene_id": scene_id,
-                            "slot_id": slot_id,
-                            "image_url": cached_scene
-                        })
-                        continue  # Skip generation, use cached scene
-                    elif base_prompt and base_prompt == cached_scene_prompt and cached_scene:
-                        logger.info(f"[{run_id}] Reusing previous scene image (same prompt) for {scene_id}: {base_prompt[:50]}...")
+                        logger.info(f"[{run_id}] ✅ Reusing previous scene image (empty prompt) for {scene_id}")
                         img_slot["image_url"] = cached_scene
                         image_results.append({
                             "scene_id": scene_id,
@@ -216,8 +280,8 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                         })
                         continue  # Skip generation, use cached scene
 
-                # Check if image_prompt is pre-computed
-                if "image_prompt" in img_slot and img_slot["image_prompt"]:
+                # Check if image_prompt is provided (non-empty)
+                if "image_prompt" in img_slot and img_slot["image_prompt"] != "":
                     # Use pre-computed prompt from json_converter
                     art_style = spec.get('art_style', '파스텔 수채화')
                     base_prompt = img_slot["image_prompt"]
@@ -334,67 +398,41 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
                     target_width, target_height = gen_width, gen_height
 
                 image_path = None
-                max_retries = 2  # Maximum retry attempts for stub detection
-                retry_count = 0
 
                 if stub_mode:
                     # Stub mode: Skip API call, directly create stub image
                     logger.info(f"[{run_id}] 🧪 STUB MODE: Skipping image generation for {scene_id}/{slot_id}")
                     image_path = None  # Force stub image creation
                 elif client:
-                    # Retry loop for stub image detection
-                    while retry_count <= max_retries:
-                        try:
-                            # Generate image based on provider type
-                            if provider == "gemini":
-                                image_path = client.generate_image(
-                                    prompt=prompt,
-                                    seed=seed,
-                                    width=gen_width,
-                                    height=gen_height,
-                                    output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                                )
-                            elif provider == "comfyui":
-                                image_path = client.generate_image(
-                                    prompt=prompt,
-                                    seed=seed,
-                                    lora_name=settings.ART_STYLE_LORA,
-                                    lora_strength=spec.get("lora_strength", 0.8),
-                                    reference_images=spec.get("reference_images", []),
-                                    output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
-                                )
+                    # Generate image (no validation - trust the API)
+                    try:
+                        # Generate image based on provider type
+                        if provider == "gemini":
+                            image_path = client.generate_image(
+                                prompt=prompt,
+                                seed=seed,
+                                width=gen_width,
+                                height=gen_height,
+                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                            )
+                        elif provider == "comfyui":
+                            image_path = client.generate_image(
+                                prompt=prompt,
+                                seed=seed,
+                                lora_name=settings.ART_STYLE_LORA,
+                                lora_strength=spec.get("lora_strength", 0.8),
+                                reference_images=spec.get("reference_images", []),
+                                output_prefix=f"app/data/outputs/{run_id}/{scene_id}_{slot_id}"
+                            )
 
-                            # Check if generated image is stub
-                            if image_path and _is_stub_image(Path(image_path)):
-                                if retry_count < max_retries:
-                                    retry_count += 1
-                                    logger.warning(f"[{run_id}] Stub image detected for {scene_id}/{slot_id}, retrying... (attempt {retry_count}/{max_retries})")
-                                    publish_progress(run_id, log=f"⚠️ 디자이너: stub 이미지 감지 - 재생성 중 ({retry_count}/{max_retries})...")
-                                    # Delete stub file and retry
-                                    Path(image_path).unlink(missing_ok=True)
-                                    image_path = None
-                                    continue
-                                else:
-                                    logger.error(f"[{run_id}] Max retries reached for {scene_id}/{slot_id}, keeping stub image")
-                                    publish_progress(run_id, log=f"❌ 디자이너: {scene_id}_{slot_id} - 최대 재시도 초과, stub 이미지 사용")
-                                    break
-                            else:
-                                # Valid image generated, break retry loop
-                                if retry_count > 0:
-                                    logger.info(f"[{run_id}] ✓ Valid image generated for {scene_id}/{slot_id} after {retry_count} retries")
-                                    publish_progress(run_id, log=f"✓ 디자이너: {scene_id}_{slot_id} - 재생성 성공!")
-                                break
+                        if image_path:
+                            logger.info(f"[{run_id}] ✓ Image generated for {scene_id}/{slot_id}: {image_path}")
+                        else:
+                            logger.warning(f"[{run_id}] Image generation returned None for {scene_id}/{slot_id}")
 
-                        except Exception as e:
-                            logger.error(f"[{run_id}] Image generation failed for {scene_id}/{slot_id}: {e}")
-                            if retry_count < max_retries:
-                                retry_count += 1
-                                logger.warning(f"[{run_id}] Retrying due to API error... (attempt {retry_count}/{max_retries})")
-                                continue
-                            else:
-                                logger.warning(f"[{run_id}] Max retries reached, falling back to stub image")
-                                image_path = None
-                                break
+                    except Exception as e:
+                        logger.error(f"[{run_id}] Image generation failed for {scene_id}/{slot_id}: {e}")
+                        image_path = None
 
                 if not image_path:
                     # Create stub image (1x1 pixel PNG)
@@ -502,6 +540,10 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
 
         logger.info(f"[{run_id}] Designer: Completed {len(image_results)} images")
         publish_progress(run_id, progress=0.4, log=f"디자이너: 모든 이미지 생성 완료 ({len(image_results)}개)")
+
+        # Cleanup unused images (images that were generated but not referenced in layout.json)
+        # DISABLED: Cleanup logic has path mismatch issues (generates in root, layout.json refs images/)
+        # _cleanup_unused_images(run_id, layout, json_path)
 
         # Update progress
         from app.main import runs

@@ -342,15 +342,18 @@ def convert_plot_to_json(
                     image_prompt_raw = image_prompt_raw.replace(f"{{{char_var}}}", char_desc)
                     logger.info(f"[{scene_id}] Replaced {{{char_var}}} with character description (length: {len(char_desc)})")
 
-            # If image_prompt is empty string "", reuse previous scene's image
-            # (handled by designer - we still create the slot but mark it for reuse)
-            if image_prompt_raw == "" and sequence > 1:
-                # Empty prompt means reuse previous image
-                logger.debug(f"Scene {scene_id}: Empty image_prompt, will reuse previous image")
-                image_prompt = ""  # Designer will handle reuse
+            # If image_prompt is empty string "", mark as "REUSE" signal for designer
+            # Designer will handle the reuse logic by checking cached images
+            if image_prompt_raw == "":
+                # Empty prompt means reuse previous image - pass empty string to designer
+                image_prompt = ""  # Designer will detect this and reuse
+                logger.info(f"[{scene_id}] Empty image_prompt → Marked for image reuse by designer")
+            elif image_prompt_raw:
+                # Use provided prompt
+                image_prompt = image_prompt_raw
             else:
-                # Use provided prompt or fallback
-                image_prompt = image_prompt_raw if image_prompt_raw else "simple background"
+                # None or other falsy (should not happen, but fallback)
+                image_prompt = "simple background"
 
             # Create single image slot for the scene (1:1 ratio, white background)
             images = [
@@ -358,13 +361,14 @@ def convert_plot_to_json(
                     slot_id="scene",
                     type="scene",  # Unified scene image type
                     ref_id=scene_id,
-                    image_url="",  # Will be filled by designer
+                    image_url="",  # Empty - designer will populate
                     z_index=0
                 ).model_dump()
             ]
 
             # Store image_prompt for designer task
             images[0]["image_prompt"] = image_prompt
+
             # Add metadata for general mode image generation
             images[0]["aspect_ratio"] = "1:1"  # General mode uses 1:1 images
             images[0]["background"] = "white"  # White background for transparency removal

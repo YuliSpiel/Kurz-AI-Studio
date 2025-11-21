@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { createRun, uploadReferenceImage } from '../api/client'
+import { createRun, uploadReferenceImage, AuthenticationError } from '../api/client'
 
 interface Character {
   name: string
@@ -12,9 +12,10 @@ interface Character {
 
 interface StoryModeFormProps {
   onRunCreated: (runId: string) => void
+  onAuthRequired: () => void
 }
 
-export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
+export default function StoryModeForm({ onRunCreated, onAuthRequired }: StoryModeFormProps) {
   const [storyText, setStoryText] = useState('')
   const [characters, setCharacters] = useState<Character[]>([
     {
@@ -141,7 +142,11 @@ export default function StoryModeForm({ onRunCreated }: StoryModeFormProps) {
       onRunCreated(result.run_id)
     } catch (error) {
       console.error('Failed to create run:', error)
-      alert('Run 생성 실패: ' + error)
+      if (error instanceof AuthenticationError) {
+        onAuthRequired()
+      } else {
+        alert('Run 생성 실패: ' + error)
+      }
     } finally {
       setIsSubmitting(false)
     }

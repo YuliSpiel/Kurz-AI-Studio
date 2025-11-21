@@ -147,8 +147,8 @@ class FFmpegRenderer:
 
         # Calculate title block height
         line_height = int(self.title_font_size * 1.3)  # 1.3x for line spacing
-        padding_top = 20
-        padding_bottom = 20
+        padding_top = 40  # Increased from 20 for better spacing
+        padding_bottom = 40  # Increased from 20 for better spacing
         padding_left = 30
 
         title_text_height = len(title_lines) * line_height

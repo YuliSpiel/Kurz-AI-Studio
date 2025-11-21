@@ -76,7 +76,7 @@ celery -A app.celery_app worker --loglevel=info --pool=solo
 ```bash
 cd backend
 source kvenv/bin/activate
-celery -A app.celery_app worker --loglevel=info --pool=solo
+celery -A app.celery_app worker --loglevel=info --pool=gevent --concurrency=10
 ```
 
 **터미널 3: FastAPI**
@@ -187,7 +187,7 @@ celery -A app.celery_app worker --loglevel=debug --pool=solo
 ```bash
 cd backend
 source kvenv/bin/activate
-celery -A app.celery_app worker --loglevel=debug
+celery -A app.celery_app worker --loglevel=debug --pool=gevent --concurrency=10
 ```
 
 ### 이미지 생성 문제

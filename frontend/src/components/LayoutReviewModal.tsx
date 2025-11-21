@@ -278,88 +278,93 @@ export default function LayoutReviewModal({ runId, onClose }: LayoutReviewModalP
                 </p>
               </div>
 
-              {/* 미리보기 섹션 - 최상단으로 이동 */}
-              <div style={sectionStyle}>
-                <h3 style={sectionTitleStyle}>👁️ 미리보기</h3>
-                <div style={previewContainerStyle}>
-                  {/* Title Block */}
-                  {config.use_title_block && (
-                    <div style={{
-                      backgroundColor: config.title_bg_color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '10px 10px',
-                      boxSizing: 'border-box',
-                      minHeight: '40px'
-                    }}>
-                      <span style={{
-                        color: 'white',
-                        fontSize: `${config.title_font_size / 4.32}px`,
-                        fontFamily: config.title_font,
-                        fontWeight: 'bold',
-                        whiteSpace: 'pre-wrap',
-                        textAlign: 'center',
-                        lineHeight: '1.2'
+              {/* 2-Column Layout: Preview Left, Controls Right */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '24px', marginTop: '20px' }}>
+                {/* Left Column: Preview */}
+                <div style={sectionStyle}>
+                  <h3 style={sectionTitleStyle}>👁️ 미리보기</h3>
+                  <div style={previewContainerStyle}>
+                    {/* Title Block */}
+                    {config.use_title_block && (
+                      <div style={{
+                        backgroundColor: config.title_bg_color,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '20px 10px',  // Increased from 10px to match backend
+                        boxSizing: 'border-box',
+                        minHeight: '40px'
                       }}>
-                        {title || '샘플 타이틀'}
-                      </span>
-                    </div>
-                  )}
-                  {/* Content area */}
-                  <div style={{
-                    flex: 1,
-                    position: 'relative',
-                    overflow: 'hidden',
-                    backgroundColor: '#ffffff',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'flex-start'
-                  }}>
-                    {/* Subtitle area - between title and image */}
-                    <div style={{
-                      width: '100%',
-                      padding: '10px 0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: '#ffffff'
-                    }}>
-                      <span style={{
-                        fontSize: `${config.subtitle_font_size / 4.32}px`,
-                        fontFamily: config.subtitle_font,
-                        color: 'black',
-                        fontWeight: 'bold',
-                        textAlign: 'center',
-                        width: '90%'
-                      }}>
-                        자막 미리보기 텍스트
-                      </span>
-                    </div>
-                    {/* Image placeholder area */}
+                        <span style={{
+                          color: 'white',
+                          fontSize: `${config.title_font_size / 4.32}px`,
+                          fontFamily: config.title_font,
+                          fontWeight: 'bold',
+                          whiteSpace: 'pre-wrap',
+                          textAlign: 'center',
+                          lineHeight: '1.2'
+                        }}>
+                          {title || '샘플 타이틀'}
+                        </span>
+                      </div>
+                    )}
+                    {/* Content area */}
                     <div style={{
                       flex: 1,
-                      width: '100%',
                       position: 'relative',
+                      overflow: 'hidden',
+                      backgroundColor: '#ffffff',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: '#f5f5f5'
+                      justifyContent: 'flex-start'
                     }}>
-                      <span style={{
-                        fontSize: '12px',
-                        color: '#9CA3AF'
+                      {/* Subtitle area - between title and image */}
+                      <div style={{
+                        width: '100%',
+                        padding: '10px 0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: '#ffffff'
                       }}>
-                        이미지 영역
-                      </span>
+                        <span style={{
+                          fontSize: `${config.subtitle_font_size / 4.32}px`,
+                          fontFamily: config.subtitle_font,
+                          color: 'black',
+                          fontWeight: 'bold',
+                          textAlign: 'center',
+                          width: '90%'
+                        }}>
+                          자막 미리보기 텍스트
+                        </span>
+                      </div>
+                      {/* Image placeholder area */}
+                      <div style={{
+                        flex: 1,
+                        width: '100%',
+                        position: 'relative',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: '#f5f5f5'
+                      }}>
+                        <span style={{
+                          fontSize: '12px',
+                          color: '#9CA3AF'
+                        }}>
+                          이미지 영역
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <p style={fieldHintStyle}>
+                    실제 크기는 위 미리보기의 약 3.86배입니다
+                  </p>
                 </div>
-                <p style={fieldHintStyle}>
-                  실제 크기는 위 미리보기의 약 3.86배입니다
-                </p>
-              </div>
+
+                {/* Right Column: Controls */}
+                <div>
 
               {/* 제목 블록 섹션 */}
               <div style={sectionStyle}>
@@ -468,6 +473,11 @@ export default function LayoutReviewModal({ runId, onClose }: LayoutReviewModalP
                   </select>
                 </div>
               </div>
+
+                </div>
+                {/* End Right Column */}
+              </div>
+              {/* End 2-Column Grid */}
             </div>
 
             <div style={footerStyle}>

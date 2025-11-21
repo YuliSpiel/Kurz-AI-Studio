@@ -4,6 +4,14 @@
 
 const API_BASE = '/api'
 
+// ============ Custom Errors ============
+export class AuthenticationError extends Error {
+  constructor(message: string = 'Authentication required') {
+    super(message)
+    this.name = 'AuthenticationError'
+  }
+}
+
 // ============ Auth Types ============
 export interface RegisterRequest {
   email: string
@@ -95,6 +103,9 @@ export async function createRun(spec: RunSpec): Promise<RunStatus> {
   })
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new AuthenticationError('로그인이 필요합니다')
+    }
     throw new Error(`Failed to create run: ${response.statusText}`)
   }
 
@@ -102,7 +113,7 @@ export async function createRun(spec: RunSpec): Promise<RunStatus> {
 }
 
 export async function getRun(runId: string): Promise<RunStatus> {
-  const response = await fetch(`${API_BASE}/runs/${runId}`)
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}`)
 
   if (!response.ok) {
     throw new Error(`Failed to get run: ${response.statusText}`)
@@ -207,7 +218,7 @@ export interface PlotJsonData {
 }
 
 export async function getPlotJson(runId: string): Promise<PlotJsonData> {
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-json`)
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/plot-json`)
 
   if (!response.ok) {
     throw new Error(`Failed to get plot JSON: ${response.statusText}`)
@@ -217,15 +228,25 @@ export async function getPlotJson(runId: string): Promise<PlotJsonData> {
 }
 
 export async function confirmPlot(runId: string, editedPlot?: any): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    throw new AuthenticationError('로그인이 필요합니다')
+  }
+
   const body = editedPlot ? { edited_plot: editedPlot } : {}
 
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-confirm`, {
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/plot-confirm`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify(body),
   })
+
+  if (response.status === 401) {
+    throw new AuthenticationError('로그인이 필요합니다')
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to confirm plot: ${response.statusText}`)
@@ -233,7 +254,7 @@ export async function confirmPlot(runId: string, editedPlot?: any): Promise<void
 }
 
 export async function regeneratePlot(runId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/plot-regenerate`, {
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/plot-regenerate`, {
     method: 'POST',
   })
 
@@ -243,7 +264,7 @@ export async function regeneratePlot(runId: string): Promise<void> {
 }
 
 export async function confirmLayout(runId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-confirm`, {
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/layout-confirm`, {
     method: 'POST',
   })
 
@@ -253,7 +274,7 @@ export async function confirmLayout(runId: string): Promise<void> {
 }
 
 export async function regenerateLayout(runId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-regenerate`, {
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/layout-regenerate`, {
     method: 'POST',
   })
 
@@ -278,7 +299,7 @@ export interface LayoutConfigData {
 }
 
 export async function getLayoutConfig(runId: string): Promise<LayoutConfigData> {
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-config`)
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/layout-config`)
 
   if (!response.ok) {
     throw new Error(`Failed to get layout config: ${response.statusText}`)
@@ -296,7 +317,7 @@ export async function confirmLayoutWithConfig(
   if (layoutConfig) body.layout_config = layoutConfig
   if (title !== undefined) body.title = title
 
-  const response = await fetch(`${API_BASE}/v1/runs/${runId}/layout-confirm`, {
+  const response = await fetch(`${API_BASE}/v1/runs/${encodeURIComponent(runId)}/layout-confirm`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -375,7 +396,7 @@ export async function deleteRun(runId: string): Promise<void> {
     throw new Error('Not authenticated')
   }
 
-  const response = await fetch(`${API_BASE}/runs/${runId}`, {
+  const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,

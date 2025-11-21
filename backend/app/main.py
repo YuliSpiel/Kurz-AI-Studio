@@ -30,9 +30,10 @@ from app.schemas.run_spec import RunSpec, RunStatus
 from app.orchestrator.fsm import FSM, RunState
 from app.utils.logger import setup_logger
 from app.utils.fonts import get_available_fonts
-from app.utils.auth import get_current_user, get_optional_current_user
+from app.utils.auth import get_current_user
 from app.routers import auth, runs as runs_router
 from app.database import get_db
+from app.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Setup logging
@@ -170,12 +171,12 @@ async def root():
 async def create_run(
     spec: RunSpec,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_optional_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Create a new shorts generation run.
     Initializes FSM and kicks off Celery orchestration.
-    Authentication is optional (works for both guest and authenticated users).
+    Authentication is required.
     """
     from app.celery_app import celery
     from app.tasks.plan import plan_task
@@ -190,12 +191,8 @@ async def create_run(
     prompt_clean = "".join(c for c in spec.prompt if c.isalnum())[:8]
     run_id = f"{timestamp}_{prompt_clean}"
 
-    # Log user info (handle both authenticated and guest users)
-    if current_user:
-        logger.info(f"[DEBUG] Received run request from user {current_user.username} ({current_user.id}):")
-    else:
-        logger.info(f"[DEBUG] Received run request from guest user:")
-
+    # Log user info
+    logger.info(f"[DEBUG] Received run request from user {current_user.username} ({current_user.id}):")
     logger.info(f"[DEBUG]   mode='{spec.mode}'")
     logger.info(f"[DEBUG]   num_cuts={spec.num_cuts}")
     logger.info(f"[DEBUG]   num_characters={spec.num_characters}")
@@ -203,23 +200,20 @@ async def create_run(
     logger.info(f"[DEBUG]   review_mode={spec.review_mode}")
     logger.info(f"Creating run {run_id} with spec: {spec.mode}, {spec.num_cuts} cuts")
 
-    # Save run to database (only if user is authenticated)
-    if current_user:
-        db_run = RunModel(
-            run_id=run_id,
-            user_id=current_user.id,
-            mode=RunMode(spec.mode),
-            prompt=spec.prompt,
-            num_cuts=spec.num_cuts,
-            num_characters=spec.num_characters,
-            state=DBRunState.IDLE,
-            progress=0,
-        )
-        db.add(db_run)
-        await db.commit()
-        logger.info(f"[{run_id}] Saved to database with user_id={current_user.id}")
-    else:
-        logger.info(f"[{run_id}] Guest user - skipping database save")
+    # Save run to database
+    db_run = RunModel(
+        run_id=run_id,
+        user_id=current_user.id,
+        mode=RunMode(spec.mode),
+        prompt=spec.prompt,
+        num_cuts=spec.num_cuts,
+        num_characters=spec.num_characters,
+        state=DBRunState.IDLE,
+        progress=0,
+    )
+    db.add(db_run)
+    await db.commit()
+    logger.info(f"[{run_id}] Saved to database with user_id={current_user.id}")
 
     # Initialize FSM
     fsm = FSM(run_id)
@@ -239,7 +233,7 @@ async def create_run(
         "logs": [],
         "created_at": None,  # Add timestamp in production
         "mode": spec.mode,  # Add mode for easy access
-        "user_id": str(current_user.id) if current_user else None,  # Store user_id in memory (None for guests)
+        "user_id": str(current_user.id),  # Store user_id in memory
     }
 
     logger.info(f"[{run_id}] Added to runs dict. Total runs: {len(runs)}")
@@ -457,9 +451,16 @@ async def get_plot_json(run_id: str):
 
 
 @app.post("/api/v1/runs/{run_id}/plot-confirm")
-async def confirm_plot(run_id: str, request: dict = Body(None)):
+async def confirm_plot(
+    run_id: str,
+    request: dict = Body(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Confirm plot and proceed to asset generation.
+
+    CRITICAL: This endpoint requires authentication.
 
     Request body (optional):
         {
@@ -472,6 +473,10 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
             "message": "Plot confirmed, proceeding to asset generation"
         }
     """
+    logger.info(f"[{run_id}] ========== PLOT-CONFIRM REQUEST RECEIVED ==========")
+    logger.info(f"[{run_id}] User: {current_user.username} ({current_user.id})")
+    logger.info(f"[{run_id}] Request body: {request}")
+
     from app.orchestrator.fsm import get_fsm, RunState
     from app.tasks.designer import designer_task
     from app.tasks.composer import composer_task
@@ -501,6 +506,18 @@ async def confirm_plot(run_id: str, request: dict = Body(None)):
             status_code=400,
             detail=f"Cannot confirm plot: current state is {fsm.current_state.value}, expected PLOT_REVIEW"
         )
+
+    # Check ownership: only the run owner can confirm the plot
+    from app.models.run import Run as RunModel
+    from sqlalchemy import select as sql_select
+    result = await db.execute(
+        sql_select(RunModel).where(RunModel.run_id == run_id)
+    )
+    db_run = result.scalars().first()
+
+    if db_run and db_run.user_id != current_user.id:
+        logger.warning(f"[{run_id}] User {current_user.username} tried to confirm plot owned by user_id {db_run.user_id}")
+        raise HTTPException(status_code=403, detail="You don't have permission to confirm this plot")
 
     try:
         import json

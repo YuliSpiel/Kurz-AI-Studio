@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getMyRuns, deleteRun, RunListItem } from '../api/client'
 import './Library.css'
 
@@ -7,6 +7,11 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null)
+  const [selectedVideo, setSelectedVideo] = useState<RunListItem | null>(null)
+  const [hoveredRunId, setHoveredRunId] = useState<string | null>(null)
+  const [videoDurations, setVideoDurations] = useState<Record<string, number>>({})
+  const [videoCurrentTimes, setVideoCurrentTimes] = useState<Record<string, number>>({})
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
 
   useEffect(() => {
     loadRuns()
@@ -27,7 +32,7 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
   }
 
   const handleDelete = async (runId: string, event: React.MouseEvent) => {
-    event.stopPropagation() // Prevent triggering onSelectVideo
+    event.stopPropagation()
 
     if (!confirm('이 영상을 삭제하시겠습니까? 삭제된 영상은 복구할 수 없습니다.')) {
       return
@@ -36,10 +41,7 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
     try {
       setDeletingRunId(runId)
       await deleteRun(runId)
-
-      // Remove from local state
       setRuns(prev => prev.filter(run => run.run_id !== runId))
-
       console.log(`Deleted run: ${runId}`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete video')
@@ -47,6 +49,52 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
     } finally {
       setDeletingRunId(null)
     }
+  }
+
+  const handleFavorite = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    // TODO: Implement favorite functionality
+    alert('즐겨찾기 기능은 곧 추가됩니다')
+  }
+
+  const handleShare = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    // TODO: Implement share functionality
+    alert('공유 기능은 곧 추가됩니다')
+  }
+
+  const handleVideoClick = (run: RunListItem) => {
+    if (run.state === 'COMPLETED' && run.video_url) {
+      setSelectedVideo(run)
+    }
+  }
+
+  const closeVideoPopup = () => {
+    setSelectedVideo(null)
+  }
+
+  const handleLoadedMetadata = (runId: string, event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const duration = event.currentTarget.duration
+    if (duration && !isNaN(duration)) {
+      setVideoDurations(prev => ({ ...prev, [runId]: duration }))
+    }
+  }
+
+  const handleTimeUpdate = (runId: string, event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const currentTime = event.currentTarget.currentTime
+    setVideoCurrentTimes(prev => ({ ...prev, [runId]: currentTime }))
+  }
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const getRemainingTime = (runId: string) => {
+    const duration = videoDurations[runId] || 0
+    const currentTime = videoCurrentTimes[runId] || 0
+    return Math.max(0, duration - currentTime)
   }
 
   const getStateColor = (state: string) => {
@@ -125,27 +173,41 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
           <div
             key={run.id}
             className="library-item"
-            onClick={() => onSelectVideo?.(run.run_id)}
-            style={{ cursor: onSelectVideo ? 'pointer' : 'default' }}
+            onClick={() => handleVideoClick(run)}
+            onMouseEnter={() => setHoveredRunId(run.run_id)}
+            onMouseLeave={() => setHoveredRunId(null)}
+            style={{ cursor: run.state === 'COMPLETED' ? 'pointer' : 'default' }}
           >
             {/* 9:16 Thumbnail */}
             <div className="library-thumbnail">
               {run.video_url && run.state === 'COMPLETED' ? (
-                <video
-                  src={run.video_url}
-                  className="thumbnail-video"
-                  muted
-                  playsInline
-                  preload="metadata"
-                  onMouseEnter={(e) => {
-                    e.currentTarget.play()
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.pause()
-                    e.currentTarget.currentTime = 0
-                  }}
-                  poster={run.thumbnail_url || undefined}
-                />
+                <>
+                  <video
+                    ref={(el) => { videoRefs.current[run.run_id] = el }}
+                    src={run.video_url}
+                    className="thumbnail-video"
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onLoadedMetadata={(e) => handleLoadedMetadata(run.run_id, e)}
+                    onTimeUpdate={(e) => handleTimeUpdate(run.run_id, e)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.play()
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.pause()
+                      e.currentTarget.currentTime = 0
+                    }}
+                    poster={run.thumbnail_url || undefined}
+                  />
+
+                  {/* Remaining Time Badge (shown on hover) */}
+                  {hoveredRunId === run.run_id && videoDurations[run.run_id] && (
+                    <div className="duration-badge">
+                      {formatDuration(getRemainingTime(run.run_id))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="thumbnail-placeholder">
                   <div className="placeholder-icon">🎬</div>
@@ -172,27 +234,77 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
               )}
             </div>
 
-            {/* Info */}
-            <div className="library-info">
-              <h3 className="library-title">{run.prompt.slice(0, 40)}{run.prompt.length > 40 ? '...' : ''}</h3>
-              <div className="library-meta">
-                <span className="meta-mode">{run.mode === 'general' ? '일반' : run.mode === 'story' ? '스토리' : '광고'}</span>
-                <span className="meta-date">{new Date(run.created_at).toLocaleDateString('ko-KR')}</span>
-              </div>
-
-              {/* Delete Button */}
+            {/* Action Buttons */}
+            <div className="library-actions">
               <button
-                className="delete-btn"
+                className="action-btn favorite-btn"
+                onClick={handleFavorite}
+                title="즐겨찾기"
+              >
+                ⭐
+              </button>
+              <button
+                className="action-btn share-btn"
+                onClick={handleShare}
+                title="공유"
+              >
+                ✈️
+              </button>
+              <button
+                className="action-btn delete-btn"
                 onClick={(e) => handleDelete(run.run_id, e)}
                 disabled={deletingRunId === run.run_id}
-                title="영상 삭제"
+                title="삭제"
               >
-                {deletingRunId === run.run_id ? '삭제중...' : '🗑️ 삭제'}
+                {deletingRunId === run.run_id ? '⏳' : '🗑️'}
               </button>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Video Player Popup */}
+      {selectedVideo && (
+        <div className="video-popup-overlay" onClick={closeVideoPopup}>
+          <div className="video-popup-container" onClick={(e) => e.stopPropagation()}>
+            {/* Close Button */}
+            <button className="popup-close-btn" onClick={closeVideoPopup}>
+              ✕
+            </button>
+
+            {/* Video Player */}
+            <div className="popup-video-wrapper">
+              <video
+                src={selectedVideo.video_url || ''}
+                className="popup-video"
+                controls
+                autoPlay
+                playsInline
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="popup-actions">
+              <button className="popup-action-btn favorite-btn" onClick={handleFavorite}>
+                ⭐ 즐겨찾기
+              </button>
+              <button className="popup-action-btn share-btn" onClick={handleShare}>
+                ✈️ 공유
+              </button>
+              <button
+                className="popup-action-btn delete-btn"
+                onClick={(e) => {
+                  handleDelete(selectedVideo.run_id, e)
+                  closeVideoPopup()
+                }}
+                disabled={deletingRunId === selectedVideo.run_id}
+              >
+                {deletingRunId === selectedVideo.run_id ? '⏳ 삭제중...' : '🗑️ 삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

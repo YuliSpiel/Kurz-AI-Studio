@@ -627,15 +627,49 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
             # Try to fix common JSON errors
             logger.info("Attempting to fix common JSON errors...")
 
-            # Fix 1: Remove trailing commas
-            fixed_content = plot_json_content.replace(",\n]", "\n]").replace(",\n}", "\n}")
+            fixed_content = plot_json_content
 
-            # Fix 2: Ensure proper quote escaping
+            # Fix 1: Remove trailing commas
+            fixed_content = fixed_content.replace(",\n]", "\n]").replace(",\n}", "\n}")
+            fixed_content = fixed_content.replace(", ]", " ]").replace(", }", " }")
+
+            # Fix 2: Handle unterminated strings by finding incomplete JSON
+            # If the error is "Unterminated string", try to truncate to the last complete object
+            if "Unterminated string" in e.msg or "Expecting ',' delimiter" in e.msg:
+                logger.warning("Detected unterminated string or delimiter error - attempting truncation fix")
+
+                # Try to find the last complete scene object
+                import re
+                # Find all complete scene objects
+                scene_pattern = r'\{\s*"scene_id"\s*:\s*"scene_\d+".+?\}\s*(?=,\s*\{|\s*\])'
+                scenes = re.findall(scene_pattern, fixed_content, re.DOTALL)
+
+                if scenes:
+                    logger.info(f"Found {len(scenes)} potentially complete scene objects")
+                    # Reconstruct JSON with only complete scenes
+                    # Try to extract metadata (title, bgm_prompt)
+                    title_match = re.search(r'"title"\s*:\s*"([^"]*)"', fixed_content)
+                    bgm_match = re.search(r'"bgm_prompt"\s*:\s*"([^"]*)"', fixed_content)
+
+                    reconstructed = "{\n"
+                    if title_match:
+                        reconstructed += f'  "title": "{title_match.group(1)}",\n'
+                    if bgm_match:
+                        reconstructed += f'  "bgm_prompt": "{bgm_match.group(1)}",\n'
+
+                    reconstructed += '  "scenes": [\n'
+                    reconstructed += ',\n'.join(scenes)
+                    reconstructed += '\n  ]\n}'
+
+                    fixed_content = reconstructed
+                    logger.info(f"Reconstructed JSON with {len(scenes)} complete scenes")
+
+            # Fix 3: Ensure proper quote escaping in text fields
             # (Gemini sometimes forgets to escape quotes in text fields)
 
             try:
                 plot_data = json.loads(fixed_content)
-                logger.info("✅ Successfully parsed after fixing trailing commas")
+                logger.info("✅ Successfully parsed after JSON repair")
             except Exception as fix_error:
                 logger.error(f"❌ Still failed after fixes: {fix_error}")
                 # Save raw response for debugging
@@ -643,28 +677,55 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
                 with open(debug_path, "w", encoding="utf-8") as f:
                     f.write(plot_response_text)
                 logger.error(f"Saved raw response to {debug_path} for debugging")
-                raise  # Re-raise original error
 
-        # VALIDATION: Check if text/speaker fields are swapped (General/Ad Mode only)
+                # Try one more time: extract just the scenes array if possible
+                logger.info("Final attempt: extracting scenes array only...")
+                try:
+                    scenes_match = re.search(r'"scenes"\s*:\s*\[(.*)\]', fixed_content, re.DOTALL)
+                    if scenes_match:
+                        scenes_str = scenes_match.group(1)
+                        # Create minimal valid structure
+                        minimal_json = f'{{"scenes": [{scenes_str}]}}'
+                        plot_data = json.loads(minimal_json)
+                        logger.info("✅ Successfully extracted scenes array")
+                    else:
+                        raise ValueError("Could not extract scenes array")
+                except Exception as final_error:
+                    logger.error(f"❌ Final extraction attempt failed: {final_error}")
+                    raise  # Re-raise original error to trigger fallback
+
+        # VALIDATION: Check if text/speaker/image_prompt fields are swapped (General/Ad Mode only)
         if mode in ["general", "ad"]:
-            logger.info("[VALIDATION] Checking for text/speaker field swap in General/Ad Mode...")
+            logger.info("[VALIDATION] Checking for text/speaker/image_prompt field swap in General/Ad Mode...")
             for scene in plot_data.get("scenes", []):
                 text_value = scene.get("text", "")
                 speaker_value = scene.get("speaker", "")
+                image_prompt_value = scene.get("image_prompt", "")
 
-                # Detect if fields are swapped:
+                # Check 1: text and image_prompt swapped
+                # - text should be dialogue (usually < 100 chars, has quotes)
+                # - image_prompt should be image description (usually > 100 chars, no quotes)
+                if len(text_value) > 100 and len(image_prompt_value) < 50:
+                    logger.warning(f"[VALIDATION] Detected text/image_prompt swap in {scene['scene_id']}")
+                    logger.warning(f"[VALIDATION]   text (len={len(text_value)}): '{text_value[:80]}...'")
+                    logger.warning(f"[VALIDATION]   image_prompt (len={len(image_prompt_value)}): '{image_prompt_value}'")
+                    logger.warning(f"[VALIDATION] Swapping text <-> image_prompt")
+                    scene["text"], scene["image_prompt"] = scene["image_prompt"], scene["text"]
+                    # Update local variables after swap
+                    text_value, image_prompt_value = scene["text"], scene["image_prompt"]
+
+                # Check 2: speaker and text swapped
                 # - speaker should be a char_id or "narration" (short string)
                 # - text should be the actual dialogue/narration content (longer string)
                 if len(speaker_value) > 30 or (speaker_value and "," in speaker_value):
-                    # speaker is too long or contains commas -> likely swapped
-                    logger.warning(f"[VALIDATION] Detected field swap in {scene['scene_id']}: speaker='{speaker_value[:50]}...', text='{text_value}'")
-                    logger.warning(f"[VALIDATION] Swapping text <-> speaker for {scene['scene_id']}")
+                    logger.warning(f"[VALIDATION] Detected speaker/text swap in {scene['scene_id']}: speaker='{speaker_value[:50]}...', text='{text_value}'")
+                    logger.warning(f"[VALIDATION] Swapping text <-> speaker")
                     scene["text"], scene["speaker"] = scene["speaker"], scene["text"]
 
-                # Additional check: if text is "narration" or a char_id, likely swapped
+                # Check 3: if text is "narration" or a char_id, likely swapped with speaker
                 if text_value in ["narration"] or text_value.startswith("char_"):
                     logger.warning(f"[VALIDATION] Detected text='{text_value}' in {scene['scene_id']}, likely swapped")
-                    logger.warning(f"[VALIDATION] Swapping text <-> speaker for {scene['scene_id']}")
+                    logger.warning(f"[VALIDATION] Swapping text <-> speaker")
                     scene["text"], scene["speaker"] = scene["speaker"], scene["text"]
 
             logger.info("[VALIDATION] Field validation complete")

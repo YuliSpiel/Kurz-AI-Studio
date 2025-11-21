@@ -1,11 +1,12 @@
 import { useState, FormEvent } from 'react'
-import { createRun } from '../api/client'
+import { createRun, AuthenticationError } from '../api/client'
 
 interface AdModeFormProps {
   onRunCreated: (runId: string) => void
+  onAuthRequired: () => void
 }
 
-export default function AdModeForm({ onRunCreated }: AdModeFormProps) {
+export default function AdModeForm({ onRunCreated, onAuthRequired }: AdModeFormProps) {
   const [productName, setProductName] = useState('')
   const [productDescription, setProductDescription] = useState('')
   const [keyFeatures, setKeyFeatures] = useState('')
@@ -45,7 +46,11 @@ CTA: ${callToAction}
       onRunCreated(result.run_id)
     } catch (error) {
       console.error('Failed to create run:', error)
-      alert('Run 생성 실패: ' + error)
+      if (error instanceof AuthenticationError) {
+        onAuthRequired()
+      } else {
+        alert('Run 생성 실패: ' + error)
+      }
     } finally {
       setIsSubmitting(false)
     }

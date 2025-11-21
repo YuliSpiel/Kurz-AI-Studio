@@ -79,6 +79,11 @@ function App() {
     setShowDetailedForm(true)
   }
 
+  const handleAuthRequired = () => {
+    setAuthModalMode('login')
+    setShowAuthModal(true)
+  }
+
   const renderModeButtons = () => (
     <div className="mode-selector">
       <button
@@ -108,11 +113,11 @@ function App() {
   const renderInputForm = () => {
     switch (appMode) {
       case 'general':
-        return <RunForm onRunCreated={handleRunCreated} enhancementData={enhancementData} />
+        return <RunForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} enhancementData={enhancementData} />
       case 'story':
-        return <StoryModeForm onRunCreated={handleRunCreated} />
+        return <StoryModeForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} />
       case 'ad':
-        return <AdModeForm onRunCreated={handleRunCreated} />
+        return <AdModeForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} />
     }
   }
 
