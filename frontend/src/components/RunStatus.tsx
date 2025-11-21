@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getRun } from '../api/client'
+import { getRun, cancelRun } from '../api/client'
 import PlotReviewModal from './PlotReviewModal'
 import LayoutReviewModal from './LayoutReviewModal'
 
@@ -7,13 +7,35 @@ interface RunStatusProps {
   runId: string
   onCompleted: (runData: any) => void
   reviewMode: boolean
+  onMinimize?: () => void
+  onClose?: () => void
 }
 
-export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusProps) {
+export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, onClose }: RunStatusProps) {
   const [status, setStatus] = useState<any>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [showPlotReview, setShowPlotReview] = useState(false)
   const [assetAnimFrame, setAssetAnimFrame] = useState(1)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [_isMinimized, setIsMinimized] = useState(false)
+
+  const handleCancel = async () => {
+    const confirmed = window.confirm('정말로 영상 제작을 취소하시겠습니까?')
+    if (!confirmed) return
+
+    setIsCancelling(true)
+    try {
+      await cancelRun(runId)
+      // Refresh status to get updated state
+      const updatedStatus = await getRun(runId)
+      setStatus(updatedStatus)
+    } catch (error) {
+      console.error('Failed to cancel run:', error)
+      alert('취소 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setIsCancelling(false)
+    }
+  }
 
   useEffect(() => {
     // Initial status fetch
@@ -95,14 +117,142 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
 
   // Asset generation animation
   useEffect(() => {
-    if (status?.state === 'ASSET_GENERATION') {
+    if (status?.state === 'ASSET_GENERATION' || status?.state === 'PLOT_GENERATION') {
+      // PLOT_GENERATION uses 9 frames, ASSET_GENERATION uses 8 frames
+      const maxFrame = status?.state === 'PLOT_GENERATION' ? 9 : 8
       const animInterval = setInterval(() => {
-        setAssetAnimFrame((prev) => (prev % 8) + 1)
+        setAssetAnimFrame((prev) => (prev % maxFrame) + 1)
       }, 150) // 150ms per frame = ~6.7 fps
 
       return () => clearInterval(animInterval)
     }
   }, [status?.state])
+
+  // Helper function to render modal header with minimize/close buttons
+  const renderModalHeader = () => {
+    const isTerminalState = status?.state === 'END' || status?.state === 'FAILED'
+
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '16px 20px',
+        borderBottom: '1px solid #E5E7EB',
+        backgroundColor: '#FFFFFF',
+        borderRadius: '16px 16px 0 0',
+        flexShrink: 0,
+        minHeight: '60px'
+      }}>
+        {/* Left: Cancel Button (only if not terminal state) */}
+        {!isTerminalState && (
+          <button
+            onClick={handleCancel}
+            disabled={isCancelling}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: isCancelling ? '#9CA3AF' : '#EF4444',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: isCancelling ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: '600',
+              transition: 'background-color 0.2s',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+            }}
+            onMouseOver={(e) => {
+              if (!isCancelling) {
+                e.currentTarget.style.backgroundColor = '#DC2626'
+              }
+            }}
+            onMouseOut={(e) => {
+              if (!isCancelling) {
+                e.currentTarget.style.backgroundColor = '#EF4444'
+              }
+            }}
+          >
+            {isCancelling ? '취소 중...' : '✕ 제작 취소'}
+          </button>
+        )}
+        {isTerminalState && <div />}
+
+        {/* Right: Minimize/Close Buttons */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {onMinimize && (
+            <button
+              onClick={() => {
+                setIsMinimized(true)
+                onMinimize()
+              }}
+              style={{
+                width: '36px',
+                height: '36px',
+                backgroundColor: '#FFFFFF',
+                border: '2px solid #E5E7EB',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '18px',
+                fontWeight: '700',
+                color: '#6B7280',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = '#F3F4F6'
+                e.currentTarget.style.borderColor = '#D1D5DB'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = '#FFFFFF'
+                e.currentTarget.style.borderColor = '#E5E7EB'
+              }}
+              title="최소화"
+            >
+              −
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={() => {
+                const confirmed = window.confirm('모달을 닫으시겠습니까? (작업은 계속 진행됩니다)')
+                if (confirmed) onClose()
+              }}
+              style={{
+                width: '36px',
+                height: '36px',
+                backgroundColor: '#FFFFFF',
+                border: '2px solid #E5E7EB',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '18px',
+                fontWeight: '700',
+                color: '#6B7280',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = '#FEE2E2'
+                e.currentTarget.style.borderColor = '#FCA5A5'
+                e.currentTarget.style.color = '#DC2626'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = '#FFFFFF'
+                e.currentTarget.style.borderColor = '#E5E7EB'
+                e.currentTarget.style.color = '#6B7280'
+              }}
+              title="닫기"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   if (!status) {
     return <div className="status-loading">로딩 중...</div>
@@ -115,6 +265,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     return (
       <div className="enhancement-modal-overlay">
         <div className="enhancement-modal-container">
+          {renderModalHeader()}
           <div className="enhancement-modal-layout">
             {/* Left: Stepper - All 6 steps completed */}
             <div className="enhancement-stepper">
@@ -339,6 +490,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     return (
       <div className="enhancement-modal-overlay">
         <div className="enhancement-modal-container">
+          {renderModalHeader()}
           <div className="enhancement-modal-layout">
             {/* Left: Stepper */}
             <div className="enhancement-stepper">
@@ -544,6 +696,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     return (
       <div className="enhancement-modal-overlay">
         <div className="enhancement-modal-container">
+          {renderModalHeader()}
           <div className="enhancement-modal-layout">
             {/* Left: Stepper */}
             <div className="enhancement-stepper">
@@ -752,6 +905,7 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     return (
       <div className="enhancement-modal-overlay">
         <div className="enhancement-modal-container">
+          {renderModalHeader()}
           <div className="enhancement-modal-layout">
             {/* Left: Stepper */}
             <div className="enhancement-stepper">
@@ -963,10 +1117,243 @@ export default function RunStatus({ runId, onCompleted, reviewMode }: RunStatusP
     )
   }
 
+  // PLOT_GENERATION 상태일 때 전체 화면 모달 표시 (시나리오 작성 중)
+  if (status.state === 'PLOT_GENERATION') {
+    return (
+      <div className="enhancement-modal-overlay">
+        <div className="enhancement-modal-container">
+          {renderModalHeader()}
+          <div className="enhancement-modal-layout">
+            {/* Left: Stepper */}
+            <div className="enhancement-stepper">
+              <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '24px', color: '#111827' }}>
+                제작 단계
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* Step 0: 프롬프트 분석 (Completed) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#7189a0', border: '2px solid #7189a0' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF">
+                      <path d="M19.7071 6.29289C20.0976 6.68342 20.0976 7.31658 19.7071 7.70711L9.70711 17.7071C9.31658 18.0976 8.68342 18.0976 8.29289 17.7071L4.29289 13.7071C3.90237 13.3166 3.90237 12.6834 4.29289 12.2929C4.68342 11.9024 5.31658 11.9024 5.70711 12.2929L9 15.5858L18.2929 6.29289C18.6834 5.90237 19.3166 5.90237 19.7071 6.29289Z"/>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      프롬프트 분석
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      완료됨
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#7189a0' }} />
+                </div>
+
+                {/* Step 1: 시나리오 작성 (Active) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#6f9fa0', border: '2px solid #6f9fa0', boxShadow: '0 0 0 4px rgba(111, 159, 160, 0.1)' }}>
+                    <div className="enhancement-step-spinner"></div>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
+                      시나리오 작성
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      AI가 스토리를 작성하고 있습니다
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
+                </div>
+
+                {/* Step 2: 에셋 생성 (Pending) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      에셋 생성
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      이미지, 음악, 음성을 생성합니다
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
+                </div>
+
+                {/* Step 3: 레이아웃 설정 (Pending) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      레이아웃 설정
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      제목 블록과 폰트를 설정합니다
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
+                </div>
+
+                {/* Step 4: 영상 합성 (Pending) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '24px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      영상 합성
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      최종 영상을 합성합니다
+                    </div>
+                  </div>
+                  <div style={{ position: 'absolute', left: '21px', top: '44px', bottom: '0', width: '2px', backgroundColor: '#E5E7EB' }} />
+                </div>
+
+                {/* Step 5: 품질 검수 (Pending) */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: '12px', paddingBottom: '0px' }}>
+                  <div className="enhancement-step-icon" style={{ backgroundColor: '#F3F4F6', border: '2px solid #E5E7EB' }}>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: '4px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#6B7280', marginBottom: '4px' }}>
+                      품질 검수
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.4' }}>
+                      최종 품질을 검수합니다
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Content - 시나리오 작성 진행 상황 */}
+            <div className="enhancement-content">
+              {/* Animation */}
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '40px 20px'
+              }}>
+                <img
+                  src={`/animations/1_plot/plotanim_0${assetAnimFrame}.png`}
+                  alt="Plot generation animation"
+                  style={{
+                    width: '300px',
+                    height: 'auto',
+                    marginBottom: '24px'
+                  }}
+                />
+                <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', marginBottom: '12px' }}>
+                  시나리오를 작성하고 있습니다
+                </h3>
+                <p style={{ fontSize: '15px', color: '#6B7280', marginBottom: '32px', textAlign: 'center' }}>
+                  기획자가 스토리 구조와 장면을 설계하고 있습니다
+                </p>
+
+                {/* Progress info */}
+                <div style={{
+                  width: '100%',
+                  maxWidth: '500px',
+                  backgroundColor: '#F9FAFB',
+                  borderRadius: '8px',
+                  padding: '20px',
+                  marginBottom: '24px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: '600', color: '#4B5563' }}>전체 진행률</span>
+                    <span style={{ fontSize: '14px', fontWeight: '700', color: '#6f9fa0' }}>{progressPercent}%</span>
+                  </div>
+                  <div style={{
+                    width: '100%',
+                    height: '8px',
+                    backgroundColor: '#E5E7EB',
+                    borderRadius: '4px',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${progressPercent}%`,
+                      height: '100%',
+                      backgroundColor: '#6f9fa0',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+
+                {/* Logs */}
+                {logs.length > 0 && (
+                  <div style={{
+                    width: '100%',
+                    maxWidth: '500px',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '8px',
+                    padding: '16px',
+                    maxHeight: '200px',
+                    overflowY: 'auto'
+                  }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#4B5563', marginBottom: '12px' }}>
+                      최근 로그
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {[...logs].reverse().slice(0, 5).map((log, idx) => (
+                        <div key={idx} style={{
+                          fontSize: '13px',
+                          color: '#6B7280',
+                          paddingLeft: '12px',
+                          borderLeft: '2px solid #E5E7EB'
+                        }}>
+                          {log}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="run-status">
-        <h2>생성 진행 중...</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>생성 진행 중...</h2>
+          {status.state !== 'END' && status.state !== 'FAILED' && (
+            <button
+              onClick={handleCancel}
+              disabled={isCancelling}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: isCancelling ? '#9CA3AF' : '#EF4444',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: isCancelling ? 'not-allowed' : 'pointer',
+                transition: 'background-color 0.2s',
+                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
+              }}
+              onMouseOver={(e) => {
+                if (!isCancelling) {
+                  e.currentTarget.style.backgroundColor = '#DC2626'
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!isCancelling) {
+                  e.currentTarget.style.backgroundColor = '#EF4444'
+                }
+              }}
+            >
+              {isCancelling ? '취소 중...' : '✕ 제작 취소'}
+            </button>
+          )}
+        </div>
 
         <div className="status-card">
           <div className="status-row">

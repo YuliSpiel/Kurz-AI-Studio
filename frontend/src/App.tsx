@@ -32,15 +32,23 @@ function App() {
   // Review mode flag
   const [isReviewMode, setIsReviewMode] = useState(false)
 
-  const handleRunCreated = (runId: string, reviewMode: boolean = false) => {
+  // Modal visibility state
+  const [isRunStatusMinimized, setIsRunStatusMinimized] = useState(false)
+
+  const handleRunCreated = (runId: string, reviewMode: boolean = false, minimized: boolean = false) => {
+    console.log('[App] handleRunCreated called:', { runId, reviewMode, minimized })
     setCurrentRunId(runId)
     setCompletedRun(null)
     setIsReviewMode(reviewMode)
+    // Only set to false if not minimized - allows HeroChat to pass minimized=true
+    setIsRunStatusMinimized(minimized)
+    console.log('[App] After setState - minimized should be:', minimized)
   }
 
   const handleRunCompleted = (runData: any) => {
     setCompletedRun(runData)
     setCurrentRunId(null)
+    setIsRunStatusMinimized(false)
   }
 
   const handleReset = () => {
@@ -184,6 +192,7 @@ function App() {
         {viewMode === 'library' ? (
           <Library onSelectVideo={(runId) => {
             setCurrentRunId(runId)
+            setIsRunStatusMinimized(false) // Open the modal when selecting from library
             setViewMode('home')
           }} />
         ) : (
@@ -206,11 +215,13 @@ function App() {
                   </>
                 )}
 
-                {currentRunId && (
+                {currentRunId && !isRunStatusMinimized && (
                   <RunStatus
                     runId={currentRunId}
                     onCompleted={handleRunCompleted}
                     reviewMode={isReviewMode}
+                    onMinimize={() => setIsRunStatusMinimized(true)}
+                    onClose={() => setCurrentRunId(null)}
                   />
                 )}
 
@@ -234,6 +245,51 @@ function App() {
         onClose={() => setShowAuthModal(false)}
         initialMode={authModalMode}
       />
+
+      {/* Minimized Tab - Always rendered outside of main for visibility */}
+      {console.log('[App] Minimized tab check:', { currentRunId, isRunStatusMinimized, viewMode })}
+      {currentRunId && isRunStatusMinimized && viewMode === 'home' && (
+        <div
+          onClick={() => setIsRunStatusMinimized(false)}
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            padding: '12px 20px',
+            backgroundColor: '#7189a0',
+            color: '#FFFFFF',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '14px',
+            fontWeight: '600',
+            zIndex: 1000,
+            transition: 'all 0.2s',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.backgroundColor = '#6f9fa0'
+            e.currentTarget.style.transform = 'translateY(-2px)'
+            e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.backgroundColor = '#7189a0'
+            e.currentTarget.style.transform = 'translateY(0)'
+            e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+          }}
+        >
+          <span style={{
+            width: '8px',
+            height: '8px',
+            backgroundColor: '#10B981',
+            borderRadius: '50%',
+            animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+          }} />
+          영상 제작 중...
+        </div>
+      )}
     </>
   )
 }

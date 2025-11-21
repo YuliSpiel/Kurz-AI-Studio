@@ -4,7 +4,7 @@ import { enhancePrompt, createRun, PromptEnhancementResult, getPlotJson, confirm
 interface HeroChatProps {
   onSubmit: (prompt: string, mode: 'general' | 'story' | 'ad') => void
   onEnhancementReady?: (enhancement: PromptEnhancementResult, originalPrompt: string) => void
-  onRunCreated?: (runId: string, reviewMode: boolean) => void
+  onRunCreated?: (runId: string, reviewMode: boolean, minimized?: boolean) => void
   disabled?: boolean
 }
 
@@ -24,7 +24,7 @@ const PLACEHOLDERS = {
   ad: ['상품 페이지 링크를 입력하세요']
 }
 
-function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
+function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
   const [prompt, setPrompt] = useState('')
   const [selectedMode, setSelectedMode] = useState<'general' | 'story' | 'ad'>('general')
   const [currentWordIndex, setCurrentWordIndex] = useState(0)
@@ -494,6 +494,134 @@ function HeroChat({ onSubmit, onEnhancementReady, onRunCreated, disabled = false
       {showEnhancementModal && (
         <div className="enhancement-modal-overlay">
           <div className="enhancement-modal-container">
+            {/* Modal Header - different buttons based on mode */}
+            <div style={{
+              display: 'flex',
+              justifyContent: modalMode === 'enhancement' ? 'flex-end' : 'space-between',
+              alignItems: 'center',
+              padding: '16px 20px',
+              borderBottom: '1px solid #E5E7EB',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px 16px 0 0',
+              flexShrink: 0,
+              minHeight: '60px'
+            }}>
+              {/* Left: Cancel Button - shown in both modes */}
+              <button
+                onClick={() => {
+                  const message = modalMode === 'enhancement'
+                    ? '프롬프트 분석을 취소하시겠습니까?'
+                    : '정말로 영상 제작을 취소하시겠습니까?'
+                  const confirmed = window.confirm(message)
+                  if (confirmed) {
+                    handleCancelEnhancement()
+                  }
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#EF4444',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  transition: 'background-color 0.2s',
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#DC2626'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#EF4444'}
+              >
+                ✕ 제작 취소
+              </button>
+
+              {/* Right side buttons - only in plot-review mode */}
+              {modalMode === 'plot-review' && (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {/* Minimize Button */}
+                  <button
+                    onClick={() => {
+                      console.log('[HeroChat] Minimize clicked, currentRunId:', currentRunId)
+                      const runIdToPass = currentRunId
+                      console.log('[HeroChat] runIdToPass:', runIdToPass, 'onRunCreated:', !!onRunCreated)
+                      if (runIdToPass && onRunCreated) {
+                        console.log('[HeroChat] Calling onRunCreated with minimized=true')
+                        onRunCreated(runIdToPass, true, true)
+                      }
+                      setShowEnhancementModal(false)
+                    }}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      backgroundColor: '#FFFFFF',
+                      border: '2px solid #E5E7EB',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: '#6B7280',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.backgroundColor = '#F3F4F6'
+                      e.currentTarget.style.borderColor = '#D1D5DB'
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.backgroundColor = '#FFFFFF'
+                      e.currentTarget.style.borderColor = '#E5E7EB'
+                    }}
+                    title="최소화"
+                  >
+                    −
+                  </button>
+
+                  {/* Close Button */}
+                  <button
+                    onClick={() => {
+                      const confirmed = window.confirm('모달을 닫으시겠습니까? (작업은 계속 진행됩니다)')
+                      if (confirmed) {
+                        const runIdToPass = currentRunId
+                        if (runIdToPass && onRunCreated) {
+                          onRunCreated(runIdToPass, true, true)
+                        }
+                        setShowEnhancementModal(false)
+                      }
+                    }}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      backgroundColor: '#FFFFFF',
+                      border: '2px solid #E5E7EB',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: '#6B7280',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.backgroundColor = '#FEE2E2'
+                      e.currentTarget.style.borderColor = '#FCA5A5'
+                      e.currentTarget.style.color = '#DC2626'
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.backgroundColor = '#FFFFFF'
+                      e.currentTarget.style.borderColor = '#E5E7EB'
+                      e.currentTarget.style.color = '#6B7280'
+                    }}
+                    title="닫기"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="enhancement-modal-layout">
               {/* Left: Stepper */}
               <div className="enhancement-stepper">
