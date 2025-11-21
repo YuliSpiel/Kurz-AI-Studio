@@ -12,6 +12,63 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _fix_truncated_json(json_str: str) -> str:
+    """
+    Attempt to fix truncated JSON by closing unclosed strings and brackets.
+    """
+    import re
+
+    # Remove trailing incomplete content after the last complete value
+    # Find the last complete key-value pair
+    lines = json_str.split('\n')
+    fixed_lines = []
+    brace_count = 0
+    bracket_count = 0
+    in_string = False
+    escape_next = False
+
+    for line in lines:
+        fixed_lines.append(line)
+        for i, char in enumerate(line):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+            if not in_string:
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                elif char == '[':
+                    bracket_count += 1
+                elif char == ']':
+                    bracket_count -= 1
+
+    result = '\n'.join(fixed_lines)
+
+    # If we're in an unclosed string, try to close it
+    if in_string:
+        # Find the last quote and truncate there, then close
+        last_quote = result.rfind('"')
+        if last_quote > 0:
+            # Find the start of the current field value
+            # Look for pattern like "key": "value...
+            result = result[:last_quote] + '...(truncated)"'
+
+    # Remove trailing comma if present
+    result = re.sub(r',\s*$', '', result.rstrip())
+
+    # Close any unclosed brackets/braces
+    result += ']' * bracket_count
+    result += '}' * brace_count
+
+    return result
+
+
 def enhance_prompt(original_prompt: str, mode: str = "general") -> Dict[str, Any]:
     """
     Analyze and enhance a user prompt for video generation.
@@ -68,8 +125,9 @@ IMPORTANT: suggested_num_characters should match the plot_outline (if dialogue b
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=2000,
-            max_retries=3
+            max_tokens=4000,  # Increased to avoid truncation
+            max_retries=3,
+            json_mode=True  # Force JSON output for structured response
         )
 
         logger.info(f"[ENHANCE] Raw LLM response length: {len(response_text)} chars")
@@ -101,10 +159,17 @@ IMPORTANT: suggested_num_characters should match the plot_outline (if dialogue b
             logger.info("[ENHANCE] Attempting to fix JSON...")
             fixed_response = cleaned_response.replace(",\n]", "\n]").replace(",\n}", "\n}")
 
+            # Try to fix truncated JSON (unterminated strings)
+            if "Unterminated string" in str(parse_error):
+                logger.info("[ENHANCE] Attempting to fix truncated JSON...")
+                # Find the last complete field and close the JSON
+                fixed_response = _fix_truncated_json(cleaned_response)
+
             try:
                 result = json.loads(fixed_response)
                 logger.info("[ENHANCE] ✅ Fixed and parsed JSON successfully")
-            except Exception:
+            except Exception as fix_error:
+                logger.error(f"[ENHANCE] ❌ Fix attempt also failed: {fix_error}")
                 raise ValueError(f"LLM 응답을 파싱할 수 없습니다: {parse_error}")
 
         # Validate fields

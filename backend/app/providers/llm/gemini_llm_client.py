@@ -40,7 +40,8 @@ class GeminiLLMClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        max_retries: int = 3
+        max_retries: int = 3,
+        json_mode: bool = False
     ) -> str:
         """
         Generate text using Gemini model with retry logic.
@@ -103,12 +104,17 @@ class GeminiLLMClient:
             try:
                 logger.info(f"[GEMINI] Attempt {attempt + 1}/{max_retries}")
 
+                # Build generation config
+                gen_config_params = {
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens,
+                }
+                if json_mode:
+                    gen_config_params["response_mime_type"] = "application/json"
+
                 response = self.model.generate_content(
                     combined_prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=temperature,
-                        max_output_tokens=max_tokens,
-                    ),
+                    generation_config=genai.types.GenerationConfig(**gen_config_params),
                     safety_settings=safety_settings,
                 )
 
@@ -160,12 +166,24 @@ class GeminiLLMClient:
 
             except Exception as e:
                 last_error = e
+                error_str = str(e)
                 logger.error(f"[GEMINI] Attempt {attempt + 1} failed: {e}")
 
+                # Check for rate limit (429) error - need longer wait
+                is_rate_limit = "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower()
+
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    logger.info(f"[GEMINI] Waiting {wait_time}s before retry...")
+                    if is_rate_limit:
+                        # For rate limit, wait longer (10s, 20s, 40s)
+                        wait_time = 10 * (2 ** attempt)
+                        logger.warning(f"[GEMINI] Rate limit detected, waiting {wait_time}s before retry...")
+                    else:
+                        wait_time = 2 ** attempt
+                        logger.info(f"[GEMINI] Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
                 else:
+                    # Final attempt failed - provide user-friendly error for rate limit
+                    if is_rate_limit:
+                        raise ValueError("API 요청 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
                     logger.error(f"[GEMINI] All {max_retries} attempts failed")
                     raise last_error
