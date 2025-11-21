@@ -363,6 +363,44 @@ class FFmpegRenderer:
 
         return img
 
+    def _get_scene_audio_duration(self, scene: Dict) -> float:
+        """
+        Calculate scene duration based on actual TTS audio duration.
+        Accounts for 1.1x speedup and 0.5s gap between clips.
+
+        Args:
+            scene: Scene dictionary
+
+        Returns:
+            Duration in seconds (with 1.1x speedup and 0.5s gap applied)
+        """
+        import subprocess as sp
+
+        total_duration = 0.0
+        audio_count = 0
+        for text_line in scene.get("texts", []):
+            audio_url = text_line.get("audio_url")
+            if audio_url and Path(audio_url).exists() and Path(audio_url).stat().st_size > 100:
+                try:
+                    probe_cmd = [
+                        "ffprobe", "-v", "error",
+                        "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        str(audio_url)
+                    ]
+                    result = sp.run(probe_cmd, capture_output=True, text=True, check=True)
+                    audio_duration = float(result.stdout.strip())
+                    # Apply 1.1x speedup + 0.5s gap
+                    total_duration += audio_duration / 1.1 + 0.5
+                    audio_count += 1
+                except Exception as e:
+                    logger.warning(f"[{self.run_id}] Failed to probe audio: {e}, using 3s default")
+                    total_duration += 3.0 / 1.1 + 0.5
+                    audio_count += 1
+
+        # Minimum duration of 0.5s if no audio
+        return max(total_duration, 0.5)
+
     def render_frames(self) -> List[Tuple[Path, float]]:
         """
         Render all scene frames.
@@ -383,9 +421,10 @@ class FFmpegRenderer:
 
         for i, scene in enumerate(scenes):
             scene_id = scene["scene_id"]
-            duration_sec = scene["duration_ms"] / 1000.0
+            # Calculate duration based on actual TTS audio (with 1.1x speedup)
+            duration_sec = self._get_scene_audio_duration(scene)
 
-            logger.info(f"[{self.run_id}] Rendering frame for {scene_id} (duration={duration_sec}s)")
+            logger.info(f"[{self.run_id}] Rendering frame for {scene_id} (audio-based duration={duration_sec:.2f}s)")
 
             # Create composite frame
             frame_img = self._composite_scene_frame(scene, title_text, title_font, subtitle_font)
@@ -453,22 +492,43 @@ class FFmpegRenderer:
             if bgm_path.exists() and bgm_path.stat().st_size > 100:
                 audio_files.append(("bgm", str(bgm_path), global_bgm.get("volume", 0.5)))
 
-        # Voice audio with timing
+        # Voice audio with timing (continuous without padding)
+        import subprocess as sp
+        current_voice_time = 0.0  # Track continuous voice timeline
         scene_start_time = 0.0
+
         for scene in self.layout.get("scenes", []):
             scene_duration = scene["duration_ms"] / 1000.0
 
             for text_line in scene.get("texts", []):
                 audio_url = text_line.get("audio_url")
                 if audio_url and Path(audio_url).exists() and Path(audio_url).stat().st_size > 100:
-                    text_start_in_scene = text_line.get("start_ms", 0) / 1000.0
-                    absolute_start = scene_start_time + text_start_in_scene
-                    audio_files.append(("voice", str(audio_url), 1.0, absolute_start))
+                    # Get actual audio duration using ffprobe
+                    try:
+                        probe_cmd = [
+                            "ffprobe", "-v", "error",
+                            "-show_entries", "format=duration",
+                            "-of", "default=noprint_wrappers=1:nokey=1",
+                            str(audio_url)
+                        ]
+                        result = sp.run(probe_cmd, capture_output=True, text=True, check=True)
+                        audio_duration = float(result.stdout.strip())
+                        # Account for 1.1x speedup
+                        sped_up_duration = audio_duration / 1.1
+                    except Exception as e:
+                        logger.warning(f"[{self.run_id}] Failed to probe audio {audio_url}: {e}, using default 3s")
+                        audio_duration = 3.0
+                        sped_up_duration = audio_duration / 1.1
+
+                    # Add voice at current continuous timeline position
+                    audio_files.append(("voice", str(audio_url), 1.0, current_voice_time))
+                    # Advance timeline by sped-up duration + 0.5s gap between TTS clips
+                    current_voice_time += sped_up_duration + 0.5
 
             scene_start_time += scene_duration
 
-        # Calculate total video duration
-        total_video_duration = scene_start_time
+        # Calculate total video duration (based on actual TTS voice timeline)
+        total_video_duration = current_voice_time if current_voice_time > 0 else scene_start_time
 
         # Add audio inputs and build filter_complex
         audio_idx = 1  # 0 is video
@@ -492,8 +552,8 @@ class FFmpegRenderer:
             else:
                 _, audio_path, volume, start_time = audio_info
                 cmd.extend(["-i", audio_path])
-                # Delay voice to match timing and apply volume
-                filter_complex_parts.append(f"[{audio_idx}:a]adelay={int(start_time * 1000)}|{int(start_time * 1000)},volume={volume}[v{audio_idx}]")
+                # Apply 1.1x speed, delay to match timing, and apply volume
+                filter_complex_parts.append(f"[{audio_idx}:a]atempo=1.1,adelay={int(start_time * 1000)}|{int(start_time * 1000)},volume={volume}[v{audio_idx}]")
                 audio_streams.append(f"[v{audio_idx}]")
                 audio_idx += 1
 
