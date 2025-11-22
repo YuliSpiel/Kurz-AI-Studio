@@ -2,13 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including Korean fonts for video rendering)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libfontconfig1 \
+    fonts-nanum \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 # Install Python dependencies
 COPY requirements.txt .
