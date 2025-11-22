@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { getMyRuns, deleteRun, RunListItem } from '../api/client'
+import ShareModal from './ShareModal'
 import './Library.css'
 
 export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: string) => void }) {
@@ -12,6 +13,10 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
   const [videoDurations, setVideoDurations] = useState<Record<string, number>>({})
   const [videoCurrentTimes, setVideoCurrentTimes] = useState<Record<string, number>>({})
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
+
+  // Share modal state
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareTarget, setShareTarget] = useState<RunListItem | null>(null)
 
   useEffect(() => {
     loadRuns()
@@ -57,10 +62,14 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
     alert('즐겨찾기 기능은 곧 추가됩니다')
   }
 
-  const handleShare = (event: React.MouseEvent) => {
+  const handleShare = (run: RunListItem, event: React.MouseEvent) => {
     event.stopPropagation()
-    // TODO: Implement share functionality
-    alert('공유 기능은 곧 추가됩니다')
+    if (run.state !== 'COMPLETED' || !run.video_url) {
+      alert('완료된 영상만 공유할 수 있습니다')
+      return
+    }
+    setShareTarget(run)
+    setShareModalOpen(true)
   }
 
   const handleVideoClick = (run: RunListItem) => {
@@ -248,7 +257,7 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
               </button>
               <button
                 className="action-btn share-btn"
-                onClick={handleShare}
+                onClick={(e) => handleShare(run, e)}
                 title="공유"
               >
                 ✈️
@@ -291,7 +300,7 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
               <button className="popup-action-btn favorite-btn" onClick={handleFavorite}>
                 ⭐ 즐겨찾기
               </button>
-              <button className="popup-action-btn share-btn" onClick={handleShare}>
+              <button className="popup-action-btn share-btn" onClick={(e) => handleShare(selectedVideo, e)}>
                 ✈️ 공유
               </button>
               <button
@@ -307,6 +316,20 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
             </div>
           </div>
         </div>
+      )}
+
+      {/* Share Modal */}
+      {shareTarget && (
+        <ShareModal
+          isOpen={shareModalOpen}
+          onClose={() => {
+            setShareModalOpen(false)
+            setShareTarget(null)
+          }}
+          videoUrl={shareTarget.video_url || ''}
+          runId={shareTarget.run_id}
+          defaultTitle={shareTarget.prompt?.slice(0, 50) || ''}
+        />
       )}
     </div>
   )

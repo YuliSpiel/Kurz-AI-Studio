@@ -32,7 +32,7 @@ from app.orchestrator.fsm import FSM, RunState
 from app.utils.logger import setup_logger
 from app.utils.fonts import get_available_fonts
 from app.utils.auth import get_current_user
-from app.routers import auth, runs as runs_router
+from app.routers import auth, runs as runs_router, youtube
 from app.database import get_db
 from app.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,6 +155,7 @@ app.mount("/outputs", StaticFiles(directory="app/data/outputs"), name="outputs")
 # Include routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(runs_router.router, prefix="/api")
+app.include_router(youtube.router, prefix="/api")
 
 
 @app.get("/")

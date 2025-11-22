@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { UserResponse, login as apiLogin, register as apiRegister, LoginRequest, RegisterRequest } from '../api/client'
+import { UserResponse, login as apiLogin, register as apiRegister, LoginRequest, RegisterRequest, getMe } from '../api/client'
 
 interface AuthContextType {
   user: UserResponse | null
@@ -8,6 +8,7 @@ interface AuthContextType {
   login: (data: LoginRequest) => Promise<void>
   register: (data: RegisterRequest) => Promise<void>
   logout: () => void
+  loginWithToken: (token: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -17,17 +18,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Load auth from localStorage on mount
+  // Load auth from localStorage on mount + handle OAuth callback
   useEffect(() => {
-    const savedToken = localStorage.getItem('auth_token')
-    const savedUser = localStorage.getItem('auth_user')
+    const initAuth = async () => {
+      // Check for OAuth callback token in URL
+      const urlParams = new URLSearchParams(window.location.search)
+      const oauthToken = urlParams.get('token')
 
-    if (savedToken && savedUser) {
-      setToken(savedToken)
-      setUser(JSON.parse(savedUser))
+      if (oauthToken && window.location.pathname === '/auth/callback') {
+        try {
+          // Fetch user info with the token
+          const userInfo = await getMe(oauthToken)
+
+          // Save to state
+          setToken(oauthToken)
+          setUser(userInfo)
+
+          // Save to localStorage
+          localStorage.setItem('auth_token', oauthToken)
+          localStorage.setItem('auth_user', JSON.stringify(userInfo))
+
+          // Clean up URL
+          window.history.replaceState({}, document.title, '/')
+        } catch (error) {
+          console.error('OAuth callback error:', error)
+          // Clean up URL even on error
+          window.history.replaceState({}, document.title, '/')
+        }
+      } else {
+        // Normal load from localStorage
+        const savedToken = localStorage.getItem('auth_token')
+        const savedUser = localStorage.getItem('auth_user')
+
+        if (savedToken && savedUser) {
+          setToken(savedToken)
+          setUser(JSON.parse(savedUser))
+        }
+      }
+
+      setIsLoading(false)
     }
 
-    setIsLoading(false)
+    initAuth()
   }, [])
 
   const login = async (data: LoginRequest) => {
@@ -59,8 +91,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('auth_user')
   }
 
+  const loginWithToken = async (newToken: string) => {
+    const userInfo = await getMe(newToken)
+
+    setToken(newToken)
+    setUser(userInfo)
+
+    localStorage.setItem('auth_token', newToken)
+    localStorage.setItem('auth_user', JSON.stringify(userInfo))
+  }
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, loginWithToken }}>
       {children}
     </AuthContext.Provider>
   )

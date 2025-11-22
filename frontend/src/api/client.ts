@@ -366,6 +366,21 @@ export async function login(data: LoginRequest): Promise<TokenResponse> {
   return response.json()
 }
 
+export async function getMe(token: string): Promise<UserResponse> {
+  const response = await fetch(`${API_BASE}/auth/me`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get user info')
+  }
+
+  return response.json()
+}
+
 // ============ Library API Functions ============
 
 export async function getMyRuns(): Promise<RunListItem[]> {
