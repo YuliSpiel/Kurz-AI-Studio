@@ -5,7 +5,6 @@ Manages state transitions: INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GE
                                         └────────────────┘                    └────────────┘               PLOT_GENERATION (재시도)
 """
 import logging
-import ssl
 from enum import Enum
 from typing import Optional, Dict, Callable
 
@@ -22,7 +21,8 @@ def _get_redis_client():
 
     ssl_params = {}
     if settings.REDIS_URL.startswith("rediss://"):
-        ssl_params["ssl_cert_reqs"] = ssl.CERT_NONE
+        # Use string "none" instead of ssl.CERT_NONE for redis-py
+        ssl_params["ssl_cert_reqs"] = "none"
 
     return redis.from_url(settings.REDIS_URL, **ssl_params)
 

@@ -21,8 +21,8 @@ def get_sync_session_maker():
     """Get or create sync database session maker for Celery tasks."""
     global _sync_engine, _sync_session_maker
     if _sync_engine is None:
-        # Convert async DATABASE_URL to sync URL
-        sync_db_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+        # Convert async DATABASE_URL to sync URL using psycopg (v3) driver
+        sync_db_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://")
         _sync_engine = create_engine(
             sync_db_url,
             echo=False,
@@ -46,8 +46,8 @@ def get_redis_client():
         redis_url = settings.REDIS_URL
         ssl_params = {}
         if redis_url.startswith("rediss://"):
-            import ssl
-            ssl_params["ssl_cert_reqs"] = ssl.CERT_NONE
+            # Use string "none" instead of ssl.CERT_NONE for redis-py
+            ssl_params["ssl_cert_reqs"] = "none"
 
         _redis_client = redis.from_url(
             redis_url,
