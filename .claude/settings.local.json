@@ -51,7 +51,8 @@
       "Bash(gsutil mb:*)",
       "Bash(gcloud compute instances set-service-account:*)",
       "Bash(gcloud compute instances start:*)",
-      "Bash(gcloud compute ssh kurz-worker --zone=us-central1-a --command=\"\n# 1. 출력 디렉토리 생성\nmkdir -p ~/kurz/backend/app/data/outputs ~/kurz/backend/app/data/uploads\n\n# 2. 현재 .env 파일의 DATABASE_URL 확인\ngrep DATABASE_URL ~/kurz/backend/.env\n\")"
+      "Bash(gcloud compute ssh kurz-worker --zone=us-central1-a --command=\"\n# 1. 출력 디렉토리 생성\nmkdir -p ~/kurz/backend/app/data/outputs ~/kurz/backend/app/data/uploads\n\n# 2. 현재 .env 파일의 DATABASE_URL 확인\ngrep DATABASE_URL ~/kurz/backend/.env\n\")",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
