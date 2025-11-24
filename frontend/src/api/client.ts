@@ -2,7 +2,10 @@
  * API client for AutoShorts backend.
  */
 
-const API_BASE = '/api'
+// Use environment variable for production, fallback to relative path for dev
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api'
 
 // ============ Custom Errors ============
 export class AuthenticationError extends Error {
@@ -61,10 +64,10 @@ interface CharacterInput {
   reference_image?: string
 }
 
-interface RunSpec {
+export interface RunSpec {
   mode: 'general' | 'story' | 'ad'
   prompt: string
-  num_characters: 1 | 2 | 3
+  num_characters: number
   num_cuts: number
   art_style: string
   music_genre: string
@@ -173,7 +176,7 @@ export async function enhancePrompt(
   originalPrompt: string,
   mode: string = 'general'
 ): Promise<PromptEnhancementResult> {
-  const response = await fetch('/api/v1/enhance-prompt', {
+  const response = await fetch(`${API_BASE}/v1/enhance-prompt`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
