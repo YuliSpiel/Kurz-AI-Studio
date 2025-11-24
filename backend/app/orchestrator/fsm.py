@@ -17,14 +17,19 @@ def _get_redis_client():
     """
     Get Redis client with proper SSL handling for rediss:// URLs (Upstash, etc.)
     """
+    import ssl
     from app.config import settings
 
-    ssl_params = {}
-    if settings.REDIS_URL.startswith("rediss://"):
-        # Use string "none" instead of ssl.CERT_NONE for redis-py
-        ssl_params["ssl_cert_reqs"] = "none"
+    redis_url = settings.REDIS_URL
 
-    return redis.from_url(settings.REDIS_URL, **ssl_params)
+    if redis_url.startswith("rediss://"):
+        # Create SSL context that doesn't verify certificates
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        return redis.from_url(redis_url, ssl=ssl_context)
+
+    return redis.from_url(redis_url)
 
 
 class RunState(Enum):
