@@ -5,10 +5,26 @@ Manages state transitions: INIT → PLOT_GENERATION → PLOT_REVIEW → ASSET_GE
                                         └────────────────┘                    └────────────┘               PLOT_GENERATION (재시도)
 """
 import logging
+import ssl
 from enum import Enum
 from typing import Optional, Dict, Callable
 
+import redis
+
 logger = logging.getLogger(__name__)
+
+
+def _get_redis_client():
+    """
+    Get Redis client with proper SSL handling for rediss:// URLs (Upstash, etc.)
+    """
+    from app.config import settings
+
+    ssl_params = {}
+    if settings.REDIS_URL.startswith("rediss://"):
+        ssl_params["ssl_cert_reqs"] = ssl.CERT_NONE
+
+    return redis.from_url(settings.REDIS_URL, **ssl_params)
 
 
 class RunState(Enum):
@@ -176,11 +192,9 @@ def get_fsm(run_id: str) -> Optional[FSM]:
     """
     # Always try Redis first for freshest state (critical for cross-process consistency)
     try:
-        from app.config import settings
-        import redis
         import pickle
 
-        r = redis.from_url(settings.REDIS_URL)
+        r = _get_redis_client()
         fsm_data = r.get(f"fsm:{run_id}")
         if fsm_data:
             fsm = pickle.loads(fsm_data)
@@ -207,11 +221,9 @@ def register_fsm(fsm: FSM):
 
     # Save to Redis for Celery workers
     try:
-        from app.config import settings
-        import redis
         import pickle
 
-        r = redis.from_url(settings.REDIS_URL)
+        r = _get_redis_client()
         fsm_data = pickle.dumps(fsm)
         r.setex(f"fsm:{fsm.run_id}", 86400, fsm_data)  # 24 hour TTL
         logger.info(f"Registered FSM for run {fsm.run_id} to Redis")
@@ -225,11 +237,9 @@ def update_fsm(fsm: FSM):
     Called after each transition to keep Redis in sync.
     """
     try:
-        from app.config import settings
-        import redis
         import pickle
 
-        r = redis.from_url(settings.REDIS_URL)
+        r = _get_redis_client()
         fsm_data = pickle.dumps(fsm)
         r.setex(f"fsm:{fsm.run_id}", 86400, fsm_data)  # 24 hour TTL
     except Exception as e:
@@ -241,10 +251,7 @@ def unregister_fsm(run_id: str):
     _fsm_registry.pop(run_id, None)
 
     try:
-        from app.config import settings
-        import redis
-
-        r = redis.from_url(settings.REDIS_URL)
+        r = _get_redis_client()
         r.delete(f"fsm:{run_id}")
         logger.info(f"Unregistered FSM for run {run_id} from Redis")
     except Exception as e:

@@ -42,10 +42,18 @@ def get_redis_client():
     """Get or create Redis client."""
     global _redis_client
     if _redis_client is None:
+        # Handle SSL for rediss:// URLs (Upstash, etc.)
+        redis_url = settings.REDIS_URL
+        ssl_params = {}
+        if redis_url.startswith("rediss://"):
+            import ssl
+            ssl_params["ssl_cert_reqs"] = ssl.CERT_NONE
+
         _redis_client = redis.from_url(
-            settings.REDIS_URL,
+            redis_url,
             encoding="utf-8",
-            decode_responses=False  # We'll handle encoding ourselves
+            decode_responses=False,  # We'll handle encoding ourselves
+            **ssl_params
         )
     return _redis_client
 
