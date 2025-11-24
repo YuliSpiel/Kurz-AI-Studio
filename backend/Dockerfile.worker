@@ -16,7 +16,9 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install email-validator==2.1.0 psycopg[binary]==3.2.3 && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY . .
@@ -24,5 +26,5 @@ COPY . .
 # Create data directories
 RUN mkdir -p app/data/uploads app/data/outputs app/data/samples
 
-# Celery worker command - uses gevent pool for concurrency
-CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--pool=gevent", "--concurrency=4"]
+# Run Celery worker
+CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--pool=gevent", "--concurrency=10"]

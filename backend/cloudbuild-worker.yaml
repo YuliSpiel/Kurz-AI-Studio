@@ -1,0 +1,68 @@
+steps:
+  # Build worker Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'Dockerfile.worker'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/kurz-worker:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/kurz-worker:latest'
+      - '.'
+
+  # Push with commit SHA tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/kurz-worker:$COMMIT_SHA']
+
+  # Push with latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/kurz-worker:latest']
+
+  # SSH into VM and deploy new worker container
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'compute'
+      - 'ssh'
+      - 'kurz-worker'
+      - '--zone=us-central1-a'
+      - '--tunnel-through-iap'
+      - '--command'
+      - |
+        # Pull latest image
+        docker pull gcr.io/$PROJECT_ID/kurz-worker:latest
+
+        # Stop and remove existing container
+        docker stop kurz-celery 2>/dev/null || true
+        docker rm kurz-celery 2>/dev/null || true
+
+        # Run new container with environment variables from metadata
+        docker run -d \
+          --name kurz-celery \
+          --restart unless-stopped \
+          -e DATABASE_URL="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/DATABASE_URL)" \
+          -e REDIS_URL="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/REDIS_URL)" \
+          -e CELERY_BROKER_URL="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/REDIS_URL)" \
+          -e CELERY_RESULT_BACKEND="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/REDIS_URL)" \
+          -e GEMINI_API_KEY="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/GEMINI_API_KEY)" \
+          -e ELEVENLABS_API_KEY="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/ELEVENLABS_API_KEY)" \
+          -e OPENAI_API_KEY="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/OPENAI_API_KEY)" \
+          -e IMAGE_PROVIDER=gemini \
+          -e TTS_PROVIDER=elevenlabs \
+          -e MUSIC_PROVIDER=elevenlabs \
+          -e ENV=production \
+          -v /home/kurz/outputs:/app/app/data/outputs \
+          gcr.io/$PROJECT_ID/kurz-worker:latest
+
+        # Verify container is running
+        sleep 5
+        docker ps | grep kurz-celery && echo "Worker deployed successfully"
+
+images:
+  - 'gcr.io/$PROJECT_ID/kurz-worker:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/kurz-worker:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
