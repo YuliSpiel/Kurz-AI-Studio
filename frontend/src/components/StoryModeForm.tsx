@@ -129,7 +129,7 @@ export default function StoryModeForm({ onRunCreated, onAuthRequired }: StoryMod
       }
 
       const result = await createRun({
-        mode: 'story',
+        mode: 'general', // Legacy: story mode deprecated
         prompt: storyText,
         num_characters: Math.max(1, characters.length),  // Support any number of characters
         num_cuts: numCuts,

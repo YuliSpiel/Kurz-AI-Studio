@@ -65,7 +65,7 @@ interface CharacterInput {
 }
 
 export interface RunSpec {
-  mode: 'general' | 'story' | 'ad'
+  mode: 'general' | 'pro'  // Updated: general (slideshow) | pro (Kling video)
   prompt: string
   num_characters: number
   num_cuts: number
@@ -83,6 +83,9 @@ export interface RunSpec {
   stub_tts_mode?: boolean
   // Plot review mode
   review_mode?: boolean
+  // Additional fields for narrative
+  narrative_tone?: string
+  plot_structure?: string
 }
 
 interface RunStatus {

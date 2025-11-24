@@ -11,7 +11,7 @@ from typing import List
 
 from app.celery_app import celery
 from app.orchestrator.fsm import RunState, get_fsm
-from app.utils.plot_generator import generate_plot_with_characters
+from app.utils.plot_generator import generate_plot_with_characters, generate_plot_pro_mode
 from app.utils.json_converter import convert_plot_to_json
 from app.utils.progress import publish_progress
 
@@ -224,41 +224,71 @@ def plan_task(self, run_id: str, spec: dict):
             raise ValueError(f"FSM not found for run {run_id}")
 
         # Step 1: Generate characters and plot
-        logger.info(f"[{run_id}] Generating characters and plot from prompt...")
-        publish_progress(run_id, progress=0.12, log="기획자: 캐릭터 및 시나리오 생성 중 (Gemini 2.5 Flash)...")
-        characters_path, plot_json_path = generate_plot_with_characters(
-            run_id=run_id,
-            prompt=spec["prompt"],
-            num_characters=spec.get("num_characters", 2),  # Default to 2 characters if not specified
-            num_cuts=spec.get("num_cuts", 7),  # Default to 7 cuts if not specified
-            mode=spec.get("mode", "general"),  # Default to general mode
-            characters=spec.get("characters"),  # Pass user-provided characters (Story Mode)
-            narrative_tone=spec.get("narrative_tone"),  # Pass narrative tone
-            plot_structure=spec.get("plot_structure")  # Pass plot structure
-        )
-        logger.info(f"[{run_id}] Characters generated: {characters_path}")
-        logger.info(f"[{run_id}] Plot JSON generated: {plot_json_path}")
-        publish_progress(run_id, progress=0.15, log=f"기획자: 캐릭터 & 시나리오 생성 완료")
+        mode = spec.get("mode", "general")
 
-        # Step 2: Convert plot.json to layout.json
-        logger.info(f"[{run_id}] Converting plot.json to layout.json...")
-        publish_progress(run_id, progress=0.17, log="기획자: 레이아웃 JSON 변환 중...")
-        json_path = convert_plot_to_json(
-            plot_json_path=str(plot_json_path),
-            run_id=run_id,
-            art_style=spec.get("art_style", "파스텔 수채화"),
-            music_genre=spec.get("music_genre", "ambient"),
-            video_title=spec.get("video_title"),
-            layout_config=spec.get("layout_config"),
-            review_mode=spec.get("review_mode", False)
-        )
-        logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
-        publish_progress(run_id, progress=0.2, log=f"기획자: 레이아웃 JSON 생성 완료")
+        if mode == "pro":
+            # Pro Mode: Use specialized plot generator with start/end frames
+            logger.info(f"[{run_id}] [PRO MODE] Generating Pro mode plot with start/end frames...")
+            publish_progress(run_id, progress=0.12, log="기획자: Pro 모드 시나리오 생성 중 (Gemini 2.5 Flash)...")
+            characters_path, plot_json_path = generate_plot_pro_mode(
+                run_id=run_id,
+                prompt=spec["prompt"],
+                num_characters=spec.get("num_characters", 2),
+                num_cuts=spec.get("num_cuts", 5),  # Pro mode default: 5 scenes (25 seconds)
+            )
+            logger.info(f"[{run_id}] [PRO MODE] Characters generated: {characters_path}")
+            logger.info(f"[{run_id}] [PRO MODE] Plot JSON generated: {plot_json_path}")
+            publish_progress(run_id, progress=0.15, log=f"기획자: Pro 모드 시나리오 생성 완료")
+        else:
+            # General/Story/Ad Mode: Use standard plot generator
+            logger.info(f"[{run_id}] Generating characters and plot from prompt...")
+            publish_progress(run_id, progress=0.12, log="기획자: 캐릭터 및 시나리오 생성 중 (Gemini 2.5 Flash)...")
+            characters_path, plot_json_path = generate_plot_with_characters(
+                run_id=run_id,
+                prompt=spec["prompt"],
+                num_characters=spec.get("num_characters", 2),  # Default to 2 characters if not specified
+                num_cuts=spec.get("num_cuts", 7),  # Default to 7 cuts if not specified
+                mode=mode,
+                characters=spec.get("characters"),  # Pass user-provided characters (Story Mode)
+                narrative_tone=spec.get("narrative_tone"),  # Pass narrative tone
+                plot_structure=spec.get("plot_structure")  # Pass plot structure
+            )
+            logger.info(f"[{run_id}] Characters generated: {characters_path}")
+            logger.info(f"[{run_id}] Plot JSON generated: {plot_json_path}")
+            publish_progress(run_id, progress=0.15, log=f"기획자: 캐릭터 & 시나리오 생성 완료")
 
-        # Step 2.5: Validate plot.json, characters.json, and layout.json
-        logger.info(f"[{run_id}] Validating plot, characters, and layout JSON...")
-        publish_progress(run_id, progress=0.21, log="기획자: JSON 검증 중...")
-        validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, characters_path, spec)
+        # Step 2: Convert plot.json to layout.json (skip for Pro mode)
+        if mode == "pro":
+            # Pro mode: Use plot.json directly, no layout.json conversion needed
+            logger.info(f"[{run_id}] [PRO MODE] Skipping layout.json conversion (using plot.json directly)")
+            publish_progress(run_id, progress=0.2, log="기획자: Pro 모드 - plot.json 직접 사용")
+            json_path = plot_json_path  # Use plot.json as the main JSON
+        else:
+            # General mode: Convert plot.json to layout.json
+            logger.info(f"[{run_id}] Converting plot.json to layout.json...")
+            publish_progress(run_id, progress=0.17, log="기획자: 레이아웃 JSON 변환 중...")
+            json_path = convert_plot_to_json(
+                plot_json_path=str(plot_json_path),
+                run_id=run_id,
+                art_style=spec.get("art_style", "파스텔 수채화"),
+                music_genre=spec.get("music_genre", "ambient"),
+                video_title=spec.get("video_title"),
+                layout_config=spec.get("layout_config"),
+                review_mode=spec.get("review_mode", False)
+            )
+            logger.info(f"[{run_id}] Layout JSON generated: {json_path}")
+            publish_progress(run_id, progress=0.2, log=f"기획자: 레이아웃 JSON 생성 완료")
+
+        # Step 2.5: Validate plot.json, characters.json, and layout.json (skip for Pro mode)
+        if mode == "pro":
+            # Pro mode: Skip validation (different JSON structure)
+            logger.info(f"[{run_id}] [PRO MODE] Skipping JSON validation (Pro mode uses different structure)")
+            publish_progress(run_id, progress=0.22, log="✓ Pro 모드 JSON 검증 생략")
+            validation_errors = []
+        else:
+            logger.info(f"[{run_id}] Validating plot, characters, and layout JSON...")
+            publish_progress(run_id, progress=0.21, log="기획자: JSON 검증 중...")
+            validation_errors = _validate_plot_json(run_id, plot_json_path, json_path, characters_path, spec)
 
         if validation_errors:
             # Check retry count from FSM metadata (persistent across Celery retries)
@@ -355,25 +385,48 @@ def plan_task(self, run_id: str, spec: dict):
                     runs[run_id]["state"] = fsm.current_state.value
 
                 # Step 4: Fan-out to asset generation tasks
-                from app.tasks.designer import designer_task
-                from app.tasks.composer import composer_task
-                from app.tasks.voice import voice_task
-                from app.tasks.director import director_task
-
                 # Convert Path to string for JSON serialization
                 json_path_str = str(json_path)
 
-                # Create chord: parallel tasks → director callback
-                asset_tasks = group(
-                    designer_task.s(run_id, json_path_str, spec),
-                    composer_task.s(run_id, json_path_str, spec),
-                    voice_task.s(run_id, json_path_str, spec),
-                )
+                if mode == "pro":
+                    # Pro Mode: Use Pro-specific designer, voice, and director
+                    from app.tasks.designer import designer_task_pro
+                    from app.tasks.composer import composer_task
+                    from app.tasks.voice import voice_task_pro
+                    from app.tasks.director import director_task_pro
 
-                # Chord: when all complete, trigger director
-                workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
+                    logger.info(f"[{run_id}] [PRO MODE] Starting Pro mode asset generation...")
+                    publish_progress(run_id, progress=0.28, log="Pro 모드 에셋 생성 시작 (디자이너, 작곡가, 성우)")
 
-                logger.info(f"[{run_id}] Asset generation chord started")
+                    # Create chord: parallel tasks → director_pro callback
+                    asset_tasks = group(
+                        designer_task_pro.s(run_id, json_path_str, spec),
+                        composer_task.s(run_id, json_path_str, spec),
+                        voice_task_pro.s(run_id, json_path_str, spec),
+                    )
+
+                    # Chord: when all complete, trigger Pro director
+                    workflow = chord(asset_tasks)(director_task_pro.s(run_id, json_path_str))
+
+                    logger.info(f"[{run_id}] [PRO MODE] Pro asset generation chord started")
+                else:
+                    # General Mode: Use standard tasks
+                    from app.tasks.designer import designer_task
+                    from app.tasks.composer import composer_task
+                    from app.tasks.voice import voice_task
+                    from app.tasks.director import director_task
+
+                    # Create chord: parallel tasks → director callback
+                    asset_tasks = group(
+                        designer_task.s(run_id, json_path_str, spec),
+                        composer_task.s(run_id, json_path_str, spec),
+                        voice_task.s(run_id, json_path_str, spec),
+                    )
+
+                    # Chord: when all complete, trigger director
+                    workflow = chord(asset_tasks)(director_task.s(run_id, json_path_str))
+
+                    logger.info(f"[{run_id}] Asset generation chord started")
 
             return {
                 "run_id": run_id,

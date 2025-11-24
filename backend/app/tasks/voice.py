@@ -236,3 +236,129 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
     except Exception as e:
         logger.error(f"[{run_id}] Voice task failed: {e}", exc_info=True)
         raise
+
+
+@celery.task(bind=True, name="tasks.voice_pro")
+def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
+    """
+    Generate TTS voice for Pro mode scenes.
+    Pro mode has a simpler structure: each scene has a single 'text' field.
+
+    Args:
+        run_id: Run identifier
+        json_path: Path to plot.json
+        spec: RunSpec as dict
+
+    Returns:
+        Dict with generated voice paths and durations
+    """
+    logger.info(f"[{run_id}] Voice Pro: Starting Pro mode TTS generation...")
+    publish_progress(run_id, progress=0.55, log="성우: Pro 모드 음성 합성 시작...")
+
+    # Check stub mode
+    stub_mode = spec.get("stub_tts_mode", False)
+    if stub_mode:
+        logger.warning(f"[{run_id}] 🧪 STUB TTS MODE: Skipping API calls")
+
+    try:
+        # Load plot.json
+        with open(json_path, "r", encoding="utf-8") as f:
+            plot = json.load(f)
+
+        # Get TTS client
+        if stub_mode:
+            from app.providers.tts.stub_client import StubTTSClient
+            client = StubTTSClient()
+        elif settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
+            from app.providers.tts.elevenlabs_client import ElevenLabsClient
+            client = ElevenLabsClient(api_key=settings.ELEVENLABS_API_KEY)
+        elif settings.TTS_PROVIDER == "playht" and settings.PLAYHT_API_KEY:
+            from app.providers.tts.playht_client import PlayHTClient
+            client = PlayHTClient(api_key=settings.PLAYHT_API_KEY)
+        else:
+            logger.warning(f"No API key for {settings.TTS_PROVIDER}, using stub TTS")
+            from app.providers.tts.stub_client import StubTTSClient
+            client = StubTTSClient()
+
+        voice_results = []
+        audio_dir = Path(f"app/data/outputs/{run_id}/audio")
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load characters.json for voice_id lookup
+        characters_json_path = Path(json_path).parent / "characters.json"
+        narration_voice = "default"
+        if characters_json_path.exists():
+            with open(characters_json_path, "r", encoding="utf-8") as f:
+                characters_data = json.load(f)
+            # Find narration voice
+            for char in characters_data.get("characters", []):
+                if char["char_id"] == "narration" and "voice_id" in char:
+                    narration_voice = char["voice_id"]
+                    break
+            logger.info(f"[{run_id}] Using narration voice: {narration_voice}")
+
+        # Generate TTS for each scene
+        scenes = plot.get("scenes", [])
+        for idx, scene in enumerate(scenes):
+            scene_id = scene["scene_id"]
+            text = scene.get("text", "")
+            speaker = scene.get("speaker", "narrator")
+
+            if not text:
+                logger.warning(f"[{run_id}] No text for {scene_id}, skipping TTS")
+                continue
+
+            # Remove quotes for TTS
+            tts_text = text.strip('"')
+
+            logger.info(f"[{run_id}] Pro TTS for {scene_id}: {tts_text[:30]}...")
+
+            audio_path = client.generate_speech(
+                text=tts_text,
+                voice_id=narration_voice,
+                emotion="neutral",
+                output_filename=str(audio_dir / f"{scene_id}_narrator.mp3")
+            )
+
+            # Measure audio duration
+            audio_duration_ms = None
+            try:
+                from moviepy.editor import AudioFileClip
+                with AudioFileClip(str(audio_path)) as audio_clip:
+                    audio_duration_ms = int(audio_clip.duration * 1000)
+                logger.info(f"[{run_id}] Audio duration: {audio_duration_ms}ms for {scene_id}")
+            except Exception as e:
+                logger.warning(f"[{run_id}] Failed to measure duration: {e}")
+                audio_duration_ms = 5000  # Default to 5s
+
+            # Update scene with audio info
+            scene["audio_url"] = str(audio_path)
+            scene["tts_duration_ms"] = audio_duration_ms
+
+            voice_results.append({
+                "scene_id": scene_id,
+                "line_id": f"{scene_id}_narrator",
+                "audio_url": str(audio_path),
+                "duration_ms": audio_duration_ms
+            })
+
+            progress = 0.55 + (0.1 * (idx + 1) / len(scenes))
+            publish_progress(run_id, progress=progress, log=f"성우: {scene_id} 음성 생성 완료")
+
+        # Save updated plot.json with audio URLs and durations
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(plot, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"[{run_id}] Voice Pro: Completed {len(voice_results)} lines")
+        publish_progress(run_id, progress=0.65, log=f"성우: Pro 모드 음성 합성 완료 ({len(voice_results)}개)")
+
+        return {
+            "run_id": run_id,
+            "agent": "voice",
+            "voice": voice_results,
+            "status": "success"
+        }
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Voice Pro task failed: {e}", exc_info=True)
+        raise

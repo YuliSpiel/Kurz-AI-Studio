@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import HeroChat from './components/HeroChat'
 import RunForm from './components/RunForm'
-import StoryModeForm from './components/StoryModeForm'
-import AdModeForm from './components/AdModeForm'
 import RunStatus from './components/RunStatus'
 import Player from './components/Player'
 import AuthModal from './components/AuthModal'
@@ -12,7 +10,7 @@ import VideoSettingsModal from './components/VideoSettingsModal'
 import { PromptEnhancementResult } from './api/client'
 import { useAuth } from './contexts/AuthContext'
 
-type AppMode = 'general' | 'story' | 'ad'
+type AppMode = 'general' | 'pro'
 type ViewMode = 'home' | 'library'
 
 function App() {
@@ -79,7 +77,7 @@ function App() {
     setViewMode('library')
   }
 
-  const handleHeroChatSubmit = (_prompt: string, mode: 'general' | 'story' | 'ad') => {
+  const handleHeroChatSubmit = (_prompt: string, mode: 'general' | 'pro') => {
     setAppMode(mode)
     setShowDetailedForm(true)
   }
@@ -105,18 +103,12 @@ function App() {
         일반 모드
       </button>
       <button
-        className={`mode-btn ${appMode === 'story' ? 'active' : ''}`}
-        onClick={() => setAppMode('story')}
+        className={`mode-btn ${appMode === 'pro' ? 'active' : ''}`}
+        onClick={() => setAppMode('pro')}
         disabled={!!currentRunId || !!completedRun}
+        title="준비 중"
       >
-        스토리 모드
-      </button>
-      <button
-        className={`mode-btn ${appMode === 'ad' ? 'active' : ''}`}
-        onClick={() => setAppMode('ad')}
-        disabled={!!currentRunId || !!completedRun}
-      >
-        광고모드
+        Pro 모드
       </button>
     </div>
   )
@@ -125,10 +117,14 @@ function App() {
     switch (appMode) {
       case 'general':
         return <RunForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} enhancementData={enhancementData} />
-      case 'story':
-        return <StoryModeForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} />
-      case 'ad':
-        return <AdModeForm onRunCreated={handleRunCreated} onAuthRequired={handleAuthRequired} />
+      case 'pro':
+        // Pro mode form - placeholder for now
+        return (
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <h3>Pro 모드 (준비 중)</h3>
+            <p>Kling AI를 활용한 실제 영상 생성 기능이 곧 출시됩니다.</p>
+          </div>
+        )
     }
   }
 

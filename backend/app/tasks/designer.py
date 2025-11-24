@@ -716,3 +716,226 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
     except Exception as e:
         logger.error(f"[{run_id}] Designer task failed: {e}", exc_info=True)
         raise
+
+
+@celery.task(bind=True, name="tasks.designer_pro")
+def designer_task_pro(self, run_id: str, json_path: str, spec: dict):
+    """
+    Generate images for Pro mode scenes (2 images per scene: start + end frame).
+
+    Args:
+        run_id: Run identifier
+        json_path: Path to JSON layout (plot.json for Pro mode)
+        spec: RunSpec as dict
+
+    Returns:
+        Dict with generated image paths
+    """
+    logger.info(f"[{run_id}] Designer Pro: Starting image generation for Pro mode...")
+    publish_progress(run_id, progress=0.3, log="디자이너: Pro 모드 이미지 생성 시작...")
+
+    # Check stub mode
+    stub_mode = spec.get("stub_image_mode", False)
+    if stub_mode:
+        logger.warning(f"[{run_id}] 🧪 STUB IMAGE MODE: Skipping Gemini API calls")
+        publish_progress(run_id, progress=0.32, log="🧪 테스트: 더미 이미지 사용 (API 생략)")
+
+    try:
+        # Load plot JSON (Pro mode uses plot.json directly)
+        with open(json_path, "r", encoding="utf-8") as f:
+            plot = json.load(f)
+
+        # Verify Pro mode
+        if plot.get("mode") != "pro":
+            logger.warning(f"[{run_id}] Expected Pro mode but got: {plot.get('mode')}")
+
+        # Load characters.json for appearance info
+        characters_json_path = Path(json_path).parent / "characters.json"
+        char_descriptions = {}  # char_id -> description mapping
+        if characters_json_path.exists():
+            with open(characters_json_path, "r", encoding="utf-8") as f:
+                characters_data = json.load(f)
+            logger.info(f"[{run_id}] Loaded characters.json for appearance data")
+
+            # Build character description lookup
+            for char in characters_data.get("characters", []):
+                if char.get("appearance"):
+                    char_descriptions[char["char_id"]] = char["appearance"]
+            logger.info(f"[{run_id}] [TEMPLATE] Loaded {len(char_descriptions)} character descriptions")
+
+        def substitute_char_variables(prompt: str) -> str:
+            """Replace {char_1}, {char_2} etc. with actual character descriptions."""
+            if not prompt or not char_descriptions:
+                return prompt
+
+            result = prompt
+            for char_id, description in char_descriptions.items():
+                placeholder = f"{{{char_id}}}"
+                if placeholder in result:
+                    result = result.replace(placeholder, description)
+                    logger.debug(f"[{run_id}] [TEMPLATE] Substituted {placeholder}")
+            return result
+
+        # Get Gemini client
+        client = None
+        if settings.GEMINI_API_KEY and not stub_mode:
+            try:
+                from app.providers.images.gemini_image_client import GeminiImageClient
+                client = GeminiImageClient(api_key=settings.GEMINI_API_KEY)
+                logger.info(f"[{run_id}] Using Gemini image provider for Pro mode")
+            except Exception as e:
+                logger.warning(f"Gemini not available: {e}, using stub images")
+                client = None
+
+        image_results = []
+        output_dir = Path(json_path).parent
+        art_style = spec.get('art_style', '파스텔 수채화')
+
+        # Generate images for each scene (2 per scene: start + end)
+        scenes = plot.get("scenes", [])
+        total_images = len(scenes) * 2
+        generated_count = 0
+
+        for scene in scenes:
+            scene_id = scene["scene_id"]
+            logger.info(f"[{run_id}] Pro mode: Generating images for {scene_id}...")
+
+            # Generate start frame
+            start_prompt = scene.get("start_frame_prompt", "")
+            if start_prompt:
+                start_prompt = substitute_char_variables(start_prompt)
+                start_prompt = f"{art_style}, {start_prompt}, no text, no speech bubbles, no Korean text"
+                start_image_path = _generate_pro_image(
+                    client=client,
+                    run_id=run_id,
+                    scene_id=scene_id,
+                    frame_type="start",
+                    prompt=start_prompt,
+                    output_dir=output_dir,
+                    stub_mode=stub_mode
+                )
+                scene["start_image_url"] = str(start_image_path)
+                image_results.append({
+                    "scene_id": scene_id,
+                    "frame_type": "start",
+                    "image_url": str(start_image_path)
+                })
+                generated_count += 1
+                progress = 0.3 + (0.15 * generated_count / total_images)
+                publish_progress(run_id, progress=progress, log=f"디자이너: {scene_id} 시작 프레임 생성 완료")
+
+            # Generate end frame
+            end_prompt = scene.get("end_frame_prompt", "")
+            if end_prompt:
+                end_prompt = substitute_char_variables(end_prompt)
+                end_prompt = f"{art_style}, {end_prompt}, no text, no speech bubbles, no Korean text"
+                end_image_path = _generate_pro_image(
+                    client=client,
+                    run_id=run_id,
+                    scene_id=scene_id,
+                    frame_type="end",
+                    prompt=end_prompt,
+                    output_dir=output_dir,
+                    stub_mode=stub_mode
+                )
+                scene["end_image_url"] = str(end_image_path)
+                image_results.append({
+                    "scene_id": scene_id,
+                    "frame_type": "end",
+                    "image_url": str(end_image_path)
+                })
+                generated_count += 1
+                progress = 0.3 + (0.15 * generated_count / total_images)
+                publish_progress(run_id, progress=progress, log=f"디자이너: {scene_id} 종료 프레임 생성 완료")
+
+        # Save updated plot.json with image URLs
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(plot, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"[{run_id}] Designer Pro: Completed {len(image_results)} images")
+        publish_progress(run_id, progress=0.45, log=f"디자이너: Pro 모드 이미지 생성 완료 ({len(image_results)}개)")
+
+        # Update progress
+        from app.main import runs
+        if run_id in runs:
+            runs[run_id]["progress"] = 0.5
+            runs[run_id]["artifacts"]["images"] = image_results
+
+        return {
+            "run_id": run_id,
+            "agent": "designer_pro",
+            "images": image_results,
+            "status": "success"
+        }
+
+    except Exception as e:
+        logger.error(f"[{run_id}] Designer Pro task failed: {e}", exc_info=True)
+        raise
+
+
+def _generate_pro_image(
+    client,
+    run_id: str,
+    scene_id: str,
+    frame_type: str,  # "start" or "end"
+    prompt: str,
+    output_dir: Path,
+    stub_mode: bool = False
+) -> Path:
+    """
+    Generate a single image for Pro mode.
+
+    Args:
+        client: GeminiImageClient instance
+        run_id: Run identifier
+        scene_id: Scene identifier
+        frame_type: "start" or "end"
+        prompt: Image generation prompt
+        output_dir: Output directory path
+        stub_mode: If True, create stub image instead of API call
+
+    Returns:
+        Path to generated image
+    """
+    # Pro mode: 9:16 vertical video format
+    gen_width, gen_height = 1080, 1920
+
+    image_path = None
+
+    if stub_mode or not client:
+        # Create stub image
+        import base64
+        stub_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+        image_path = output_dir / f"{scene_id}_{frame_type}.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(image_path, "wb") as f:
+            f.write(stub_png)
+        logger.info(f"[{run_id}] Created stub image: {image_path}")
+    else:
+        try:
+            # Generate image using Gemini
+            output_prefix = str(output_dir / f"{scene_id}_{frame_type}")
+            image_path = client.generate_image(
+                prompt=prompt,
+                seed=settings.BG_SEED_BASE,
+                width=gen_width,
+                height=gen_height,
+                output_prefix=output_prefix
+            )
+            logger.info(f"[{run_id}] ✓ Pro mode image generated: {image_path}")
+        except Exception as e:
+            logger.error(f"[{run_id}] Image generation failed: {e}")
+            # Fallback to stub
+            import base64
+            stub_png = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            )
+            image_path = output_dir / f"{scene_id}_{frame_type}.png"
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(image_path, "wb") as f:
+                f.write(stub_png)
+            logger.warning(f"[{run_id}] Fallback to stub image: {image_path}")
+
+    return Path(image_path) if image_path else output_dir / f"{scene_id}_{frame_type}.png"

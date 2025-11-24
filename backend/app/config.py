@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # Gemini (Image Generation - Nano Banana)
     GEMINI_API_KEY: str = ""
 
+    # Kling AI (Video Generation - Pro Mode)
+    KLING_ACCESS_KEY: str = ""
+    KLING_SECRET_KEY: str = ""
+    KLING_VIDEO_DURATION: int = 5  # seconds (fixed)
+    PRO_MODE_MAX_TEXT_LENGTH: int = 25  # chars per scene for TTS
+
     # S3/R2 Storage (optional)
     S3_ENDPOINT: str = ""
     S3_ACCESS_KEY: str = ""

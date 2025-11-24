@@ -758,6 +758,234 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
         return _generate_fallback(output_dir, prompt, num_characters, num_cuts, mode, characters)
 
 
+def generate_plot_pro_mode(
+    run_id: str,
+    prompt: str,
+    num_cuts: int,
+    narrative_tone: str = None,
+    plot_structure: str = None
+) -> Tuple[Path, Path]:
+    """
+    Generate plot.json for Pro Mode (Kling AI video generation).
+
+    Pro Mode features:
+    - Each scene has start_frame_prompt and end_frame_prompt (for image-to-video)
+    - Fixed 5-second duration per scene
+    - Text limited to ~20 characters (readable in 5 seconds)
+
+    Args:
+        run_id: Run identifier
+        prompt: User prompt
+        num_cuts: Number of scenes/cuts
+        narrative_tone: Narrative tone/style
+        plot_structure: Plot structure
+
+    Returns:
+        Tuple of (characters_json_path, plot_json_path)
+    """
+    from app.providers.llm.gemini_llm_client import GeminiLLMClient
+    from app.config import settings
+
+    logger.info(f"[PRO MODE] Generating plot for: {prompt[:50]}...")
+
+    output_dir = Path(f"app/data/outputs/{run_id}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    characters_path = output_dir / "characters.json"
+    plot_path = output_dir / "plot.json"
+
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("No Gemini API key")
+
+    client = GeminiLLMClient(api_key=settings.GEMINI_API_KEY)
+
+    # Load voices for character generation
+    voices_data = {}
+    voices_paths = [Path("voices.json"), Path("../voices.json")]
+    for voices_path in voices_paths:
+        if voices_path.exists():
+            with open(voices_path, "r", encoding="utf-8") as f:
+                voices_data = json.load(f)
+            break
+
+    female_voices = voices_data.get("voices", {}).get("female", [])
+    male_voices = voices_data.get("voices", {}).get("male", [])
+
+    # Build style instructions
+    style_instructions = ""
+    if narrative_tone:
+        style_instructions += f"\n**말투/톤**: {narrative_tone}\n"
+    if plot_structure:
+        style_instructions += f"\n**플롯 구조**: {plot_structure}\n"
+
+    # Step 1: Generate characters
+    char_prompt = f"""당신은 숏폼 영상 콘텐츠의 캐릭터 디자이너입니다.
+사용자의 요청에 맞는 1-3명의 캐릭터를 만들어주세요.
+
+각 캐릭터마다 다음 정보를 JSON 형식으로 제공하세요:
+- char_id: char_1, char_2, ... 형식
+- name: 캐릭터 이름
+- description: 외형 묘사 (이미지 생성용, 매우 상세하게)
+  - 나이, 성별, 헤어스타일, 헤어 색상, 눈 색상, 피부톤, 체형, 의상 등
+- seed: 각 캐릭터마다 고유한 정수 (1000-9999)
+
+JSON 형식:
+{{
+  "characters": [
+    {{
+      "char_id": "char_1",
+      "name": "캐릭터 이름",
+      "description": "25세 여성, 긴 검은 머리, 파란 눈동자, 밝은 피부, 흰색 티셔츠",
+      "seed": 1001
+    }}
+  ]
+}}"""
+
+    logger.info("[PRO MODE] Step 1: Generating characters...")
+    char_response = client.generate_text(
+        messages=[
+            {"role": "system", "content": char_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.9,
+        max_tokens=2000,
+        json_mode=True
+    )
+
+    char_json = char_response.strip()
+    if char_json.startswith("```"):
+        lines = char_json.split("\n")
+        char_json = "\n".join([l for l in lines if not l.startswith("```")])
+
+    characters_data = json.loads(char_json)
+
+    # Add voice_id to characters
+    for i, char in enumerate(characters_data.get("characters", [])):
+        if female_voices:
+            char["voice_id"] = female_voices[i % len(female_voices)]["voice_id"]
+        else:
+            char["voice_id"] = "xi3rF0t7dg7uN2M0WUhr"  # Default
+
+    # Add narrator
+    characters_data["characters"].append({
+        "char_id": "narrator",
+        "name": "내레이터",
+        "description": None,
+        "voice_id": male_voices[0]["voice_id"] if male_voices else "uyVNoMrnUku1dZyVEXwD",
+        "seed": 9999
+    })
+
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(characters_data, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"[PRO MODE] Characters saved: {characters_path}")
+
+    # Build character list for plot prompt
+    char_list = "\n".join([
+        f"- {{{c['char_id']}}}: {c['name']} - {c.get('description', '내레이터')}"
+        for c in characters_data["characters"]
+    ])
+
+    # Step 2: Generate Pro Mode plot
+    plot_prompt = f"""당신은 Kling AI 영상 생성을 위한 시나리오 작가입니다.
+사용자의 요청을 **정확히 {num_cuts}개의 5초 장면**으로 나누어주세요.
+{style_instructions}
+
+**Pro 모드 특징**:
+- 각 장면은 정확히 5초 영상으로 생성됩니다
+- 시작 프레임과 끝 프레임 이미지를 기반으로 AI가 그 사이 움직임을 생성합니다
+- 자막은 5초 내에 읽을 수 있어야 합니다 (~20자)
+
+등장인물 (변수로 사용):
+{char_list}
+
+각 장면마다 다음 정보를 JSON 형식으로 제공하세요:
+- scene_id: scene_1, scene_2, ... 형식
+- start_frame_prompt: 시작 프레임 이미지 프롬프트
+  - **반드시 캐릭터 변수 {{char_1}}, {{char_2}} 등을 사용**
+  - 형식: "{{변수}} + 동작/표정 + 배경"
+- end_frame_prompt: 끝 프레임 이미지 프롬프트
+  - 시작 프레임과 자연스럽게 이어지는 동작
+  - 같은 캐릭터, 같은 배경, 다른 포즈/표정
+- text: 자막 (5초 내 읽을 수 있도록 **최대 20자**)
+- speaker: 화자 (char_1, char_2, narrator 등)
+- duration_ms: 5000 (고정)
+
+**중요 규칙**:
+1. start_frame과 end_frame은 같은 배경, 같은 캐릭터여야 함
+2. 동작이 자연스럽게 연결되어야 함 (예: 앉아있다 → 일어선다)
+3. 텍스트는 반드시 20자 이내
+4. 캐릭터 변수 반드시 사용
+
+JSON 형식:
+{{
+  "mode": "pro",
+  "title": "영상 제목",
+  "bgm_prompt": "음악 스타일 프롬프트",
+  "characters": [
+    {{ "char_id": "char_1", "name": "이름", "description": "외형 묘사" }}
+  ],
+  "scenes": [
+    {{
+      "scene_id": "scene_1",
+      "start_frame_prompt": "{{char_1}} + 창가에 앉아 책을 읽고 있다 + 햇살 가득한 방",
+      "end_frame_prompt": "{{char_1}} + 고개를 들어 창밖을 바라본다 + 햇살 가득한 방",
+      "text": "오늘도 평화로운 하루",
+      "speaker": "narrator",
+      "duration_ms": 5000,
+      "tts_duration_ms": null,
+      "video_url": null,
+      "start_image_url": null,
+      "end_image_url": null,
+      "audio_url": null
+    }}
+  ]
+}}"""
+
+    logger.info("[PRO MODE] Step 2: Generating plot...")
+    plot_response = client.generate_text(
+        messages=[
+            {"role": "system", "content": plot_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=1.0,
+        max_tokens=8000,
+        json_mode=True
+    )
+
+    plot_json = plot_response.strip()
+    if plot_json.startswith("```json"):
+        plot_json = plot_json[7:]
+    if plot_json.startswith("```"):
+        plot_json = plot_json[3:]
+    if plot_json.endswith("```"):
+        plot_json = plot_json[:-3]
+
+    plot_data = json.loads(plot_json.strip())
+
+    # Add characters from characters_data for template substitution
+    plot_data["characters"] = [
+        {
+            "char_id": c["char_id"],
+            "name": c["name"],
+            "description": c.get("description", "")
+        }
+        for c in characters_data.get("characters", [])
+        if c.get("description")  # Exclude narrator
+    ]
+
+    # Ensure mode is set
+    plot_data["mode"] = "pro"
+
+    with open(plot_path, "w", encoding="utf-8") as f:
+        json.dump(plot_data, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"[PRO MODE] Plot saved: {plot_path}")
+    logger.info(f"[PRO MODE] Generated {len(plot_data.get('scenes', []))} scenes")
+
+    return characters_path, plot_path
+
+
 def _generate_fallback(
     output_dir: Path,
     prompt: str,

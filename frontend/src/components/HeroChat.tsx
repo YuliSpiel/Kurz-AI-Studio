@@ -2,10 +2,29 @@ import { useState, useEffect } from 'react'
 import { enhancePrompt, createRun, PromptEnhancementResult, getPlotJson, confirmPlot, regeneratePlot, PlotJsonData, Character } from '../api/client'
 
 interface HeroChatProps {
-  onSubmit: (prompt: string, mode: 'general' | 'story' | 'ad') => void
+  onSubmit: (prompt: string, mode: 'general' | 'pro') => void
   onEnhancementReady?: (enhancement: PromptEnhancementResult, originalPrompt: string) => void
   onRunCreated?: (runId: string, reviewMode: boolean, minimized?: boolean) => void
   disabled?: boolean
+}
+
+// Mode configuration with token costs and descriptions
+const MODE_CONFIG: Record<'general' | 'pro', {
+  name: string
+  tokens: number
+  description: string
+  disabled?: boolean
+}> = {
+  general: {
+    name: '일반',
+    tokens: 3,
+    description: 'AI 이미지 기반 슬라이드쇼 영상을 생성합니다',
+  },
+  pro: {
+    name: 'Pro',
+    tokens: 5,
+    description: 'Kling AI를 활용한 실제 영상을 생성합니다',
+  },
 }
 
 interface Scene {
@@ -18,15 +37,14 @@ interface Scene {
 const ROTATING_WORDS = ['Epic', 'Cool', 'Fire', 'Viral', 'Neat', 'Bold']
 const COLORS = ['#6f9fa0', '#7189a0', '#c9a989'] // 짙게 한 버전
 
-const PLACEHOLDERS = {
+const PLACEHOLDERS: Record<'general' | 'pro', string[]> = {
   general: ['2030 직장인 공감 썰', '세계 5대 명소 추천'],
-  story: ['소꿉친구랑 결혼 골인한 이야기', '아기 고양이의 우주 모험'],
-  ad: ['상품 페이지 링크를 입력하세요']
+  pro: ['소꿉친구랑 결혼 골인한 이야기', '아기 고양이의 우주 모험'],
 }
 
 function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
   const [prompt, setPrompt] = useState('')
-  const [selectedMode, setSelectedMode] = useState<'general' | 'story' | 'ad'>('general')
+  const [selectedMode, setSelectedMode] = useState<'general' | 'pro'>('general')
   const [currentWordIndex, setCurrentWordIndex] = useState(0)
   const [isAnimating, setIsAnimating] = useState(false)
   const [typedPlaceholder, setTypedPlaceholder] = useState('')
@@ -85,8 +103,8 @@ function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCrea
   useEffect(() => {
     if (!currentPlaceholderText) return
 
-    // Ad mode: no typing effect, show immediately
-    if (selectedMode === 'ad') {
+    // Pro mode: no typing effect, show immediately
+    if (selectedMode === 'pro') {
       setTypedPlaceholder(currentPlaceholderText)
       return
     }
@@ -138,7 +156,10 @@ function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCrea
     return () => clearInterval(interval)
   }, [isLoadingPlot])
 
-  const handleModeChange = (mode: 'general' | 'story' | 'ad') => {
+  const handleModeChange = (mode: 'general' | 'pro') => {
+    // Don't allow switching to disabled modes
+    if (MODE_CONFIG[mode].disabled) return
+
     const placeholders = PLACEHOLDERS[mode]
     const randomIndex = Math.floor(Math.random() * placeholders.length)
     setCurrentPlaceholderText(placeholders[randomIndex])
@@ -445,30 +466,30 @@ function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCrea
 
             <div className="hero-chat-actions">
               <div className="hero-chat-mode-selector">
-                <button
-                  type="button"
-                  className={`hero-mode-chip ${selectedMode === 'general' ? 'active' : ''}`}
-                  onClick={() => handleModeChange('general')}
-                  disabled={disabled}
-                >
-                  일반
-                </button>
-                <button
-                  type="button"
-                  className={`hero-mode-chip ${selectedMode === 'story' ? 'active' : ''}`}
-                  onClick={() => handleModeChange('story')}
-                  disabled={disabled}
-                >
-                  스토리
-                </button>
-                <button
-                  type="button"
-                  className={`hero-mode-chip ${selectedMode === 'ad' ? 'active' : ''}`}
-                  onClick={() => handleModeChange('ad')}
-                  disabled={disabled}
-                >
-                  광고
-                </button>
+                {(Object.keys(MODE_CONFIG) as Array<'general' | 'pro'>).map((mode) => {
+                  const config = MODE_CONFIG[mode]
+                  const isActive = selectedMode === mode
+                  const isDisabled = disabled || config.disabled
+
+                  return (
+                    <div key={mode} className="hero-mode-chip-wrapper">
+                      <button
+                        type="button"
+                        className={`hero-mode-chip ${isActive ? 'active' : ''} ${config.disabled ? 'coming-soon' : ''}`}
+                        onClick={() => handleModeChange(mode)}
+                        disabled={isDisabled}
+                      >
+                        <span className="hero-mode-chip-name">{config.name}</span>
+                        <span className={`hero-mode-chip-tokens ${isActive ? 'active' : ''}`}>
+                          {config.tokens}
+                        </span>
+                      </button>
+                      <div className="hero-mode-tooltip">
+                        {config.description}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
 
               <button

@@ -35,7 +35,7 @@ CTA: ${callToAction}
       `.trim()
 
       const result = await createRun({
-        mode: 'ad',
+        mode: 'general', // Legacy: ad mode deprecated
         prompt: adPrompt,
         num_characters: 1, // Ad mode typically has 1 spokesperson or no character
         num_cuts: numCuts,

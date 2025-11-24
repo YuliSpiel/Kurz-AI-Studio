@@ -838,6 +838,88 @@ body {
   cursor: not-allowed;
 }
 
+/* Mode chip wrapper for tooltip */
+.hero-mode-chip-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+/* Mode chip with token badge */
+.hero-mode-chip-name {
+  margin-right: 6px;
+}
+
+.hero-mode-chip-tokens {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(28, 28, 28, 0.1);
+  color: rgba(28, 28, 28, 0.6);
+  border-radius: 9999px;
+  transition: all 0.15s ease;
+}
+
+.hero-mode-chip-tokens.active {
+  background: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.hero-mode-chip.coming-soon {
+  opacity: 0.6;
+}
+
+.hero-mode-chip.coming-soon::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  background: #f59e0b;
+  border-radius: 50%;
+}
+
+/* Mode tooltip */
+.hero-mode-tooltip {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(28, 28, 28, 0.95);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.hero-mode-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(28, 28, 28, 0.95);
+}
+
+.hero-mode-chip-wrapper:hover .hero-mode-tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
 .hero-chat-submit {
   display: flex;
   height: 32px;
