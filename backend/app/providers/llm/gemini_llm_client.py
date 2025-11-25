@@ -1,9 +1,11 @@
 """
 Gemini LLM Client for text generation using Google's Generative AI.
+Uses requests library for reliable API calls.
 """
 import logging
-from typing import List, Dict, Optional
-import google.generativeai as genai
+import time
+import requests
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +13,7 @@ logger = logging.getLogger(__name__)
 class GeminiLLMClient:
     """
     Client for interacting with Google's Gemini models (gemini-2.5-flash).
+    Uses REST API directly for reliable performance.
     """
 
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
@@ -26,12 +29,7 @@ class GeminiLLMClient:
 
         self.api_key = api_key
         self.model_name = model_name
-
-        # Configure genai
-        genai.configure(api_key=self.api_key)
-
-        # Initialize model
-        self.model = genai.GenerativeModel(self.model_name)
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
         logger.info(f"Initialized GeminiLLMClient with model: {self.model_name}")
 
@@ -51,6 +49,7 @@ class GeminiLLMClient:
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens to generate
             max_retries: Maximum number of retry attempts
+            json_mode: If True, request JSON response format
 
         Returns:
             Generated text as string
@@ -58,16 +57,11 @@ class GeminiLLMClient:
         Raises:
             Exception: If API call fails after all retries
         """
-        import time
-
         # Combine system and user messages
-        # Gemini doesn't have explicit system role, so we prepend system message to user prompt
         combined_prompt = ""
-
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-
             if role == "system":
                 combined_prompt += f"{content}\n\n"
             elif role == "user":
@@ -77,27 +71,25 @@ class GeminiLLMClient:
         logger.info(f"[GEMINI] Prompt length: {len(combined_prompt)} chars")
         logger.info(f"[GEMINI] Prompt preview (first 500 chars): {combined_prompt[:500]}...")
 
-        # Generate content with safety settings
-        from google.generativeai.types import HarmCategory, HarmBlockThreshold
+        url = f"{self.base_url}/models/{self.model_name}:generateContent?key={self.api_key}"
 
-        safety_settings = [
-            {
-                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
+        # Build request body
+        request_body = {
+            "contents": [{"parts": [{"text": combined_prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
             },
-            {
-                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-            {
-                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-            {
-                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-        ]
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+        }
+
+        if json_mode:
+            request_body["generationConfig"]["responseMimeType"] = "application/json"
 
         last_error = None
 
@@ -105,75 +97,69 @@ class GeminiLLMClient:
             try:
                 logger.info(f"[GEMINI] Attempt {attempt + 1}/{max_retries}")
 
-                # Build generation config
-                gen_config_params = {
-                    "temperature": temperature,
-                    "max_output_tokens": max_tokens,
-                }
-                if json_mode:
-                    gen_config_params["response_mime_type"] = "application/json"
-
-                response = self.model.generate_content(
-                    combined_prompt,
-                    generation_config=genai.types.GenerationConfig(**gen_config_params),
-                    safety_settings=safety_settings,
+                response = requests.post(
+                    url,
+                    json=request_body,
+                    headers={"Content-Type": "application/json"},
+                    timeout=60  # 60 second timeout
                 )
 
-                # Extract text from response
-                if not response.candidates:
-                    error_msg = "No candidates in response"
-                    logger.warning(f"[GEMINI] {error_msg}")
+                if response.status_code == 429:
+                    # Rate limit - wait and retry
+                    wait_time = 10 * (2 ** attempt)
+                    logger.warning(f"[GEMINI] Rate limit (429), waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+
+                if response.status_code != 200:
+                    error_msg = f"API error {response.status_code}: {response.text[:500]}"
+                    logger.error(f"[GEMINI] {error_msg}")
                     if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                        continue
-                    raise ValueError(error_msg)
-
-                # Check for blocked responses
-                candidate = response.candidates[0]
-                finish_reason = candidate.finish_reason
-
-                logger.debug(f"[GEMINI] Finish reason: {finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'})")
-                logger.debug(f"[GEMINI] Safety ratings: {candidate.safety_ratings}")
-
-                # finish_reason enum: STOP (success), MAX_TOKENS (hit limit), SAFETY (blocked), RECITATION, OTHER
-                # Allow STOP and MAX_TOKENS - both provide usable content
-                # Note: finish_reason can be int or Enum depending on API version
-                finish_reason_value = finish_reason.value if hasattr(finish_reason, 'value') else finish_reason
-                if finish_reason_value not in [1, 2]:  # 1=STOP, 2=MAX_TOKENS
-                    error_msg = (
-                        f"Response blocked with finish_reason={finish_reason} ({finish_reason.name if hasattr(finish_reason, 'name') else 'unknown'}). "
-                        f"Safety ratings: {candidate.safety_ratings}"
-                    )
-                    logger.warning(f"[GEMINI] {error_msg}")
-
-                    # If safety-blocked, retry with adjusted temperature
-                    if attempt < max_retries - 1:
-                        temperature = max(0.3, temperature - 0.2)  # Lower temperature
-                        logger.info(f"[GEMINI] Retrying with lower temperature: {temperature}")
                         time.sleep(2 ** attempt)
                         continue
                     raise ValueError(error_msg)
 
-                # Try to extract text - handle cases where parts might be empty
-                try:
-                    result_text = response.text
-                except ValueError as e:
-                    # response.text raises ValueError if no valid parts
-                    # Try to extract from parts directly
-                    if candidate.content and candidate.content.parts:
-                        result_text = "".join([p.text for p in candidate.content.parts if hasattr(p, 'text')])
-                    else:
-                        error_msg = f"No text content in response: {e}"
-                        logger.warning(f"[GEMINI] {error_msg}")
-                        if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)
-                            continue
-                        raise ValueError(error_msg)
+                data = response.json()
 
-                # For JSON mode, accept shorter responses since valid JSON can be compact
-                min_length = 10 if json_mode else 50
-                if not result_text or len(result_text) < min_length:
-                    error_msg = f"Generated text too short ({len(result_text)} chars, min: {min_length})"
+                # Extract text from response
+                if "candidates" not in data or not data["candidates"]:
+                    error_msg = "No candidates in response"
+                    logger.warning(f"[GEMINI] {error_msg}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(error_msg)
+
+                candidate = data["candidates"][0]
+
+                # Check finish reason
+                finish_reason = candidate.get("finishReason", "UNKNOWN")
+                if finish_reason not in ["STOP", "MAX_TOKENS"]:
+                    error_msg = f"Response blocked: {finish_reason}"
+                    logger.warning(f"[GEMINI] {error_msg}")
+                    if attempt < max_retries - 1:
+                        temperature = max(0.3, temperature - 0.2)
+                        request_body["generationConfig"]["temperature"] = temperature
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(error_msg)
+
+                # Extract text
+                content = candidate.get("content", {})
+                parts = content.get("parts", [])
+                if not parts:
+                    error_msg = "No parts in response content"
+                    logger.warning(f"[GEMINI] {error_msg}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(error_msg)
+
+                result_text = parts[0].get("text", "")
+
+                # Validate response - just check it's not empty
+                if not result_text:
+                    error_msg = "Empty response"
                     logger.warning(f"[GEMINI] {error_msg}")
                     if attempt < max_retries - 1:
                         time.sleep(2 ** attempt)
@@ -183,26 +169,26 @@ class GeminiLLMClient:
                 logger.info(f"[GEMINI] ✅ Generated {len(result_text)} characters successfully")
                 return result_text
 
+            except requests.exceptions.Timeout:
+                last_error = Exception("Request timeout")
+                logger.error(f"[GEMINI] Timeout on attempt {attempt + 1}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                logger.error(f"[GEMINI] Request error: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+
             except Exception as e:
                 last_error = e
-                error_str = str(e)
                 logger.error(f"[GEMINI] Attempt {attempt + 1} failed: {e}")
-
-                # Check for rate limit (429) error - need longer wait
-                is_rate_limit = "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower()
-
                 if attempt < max_retries - 1:
-                    if is_rate_limit:
-                        # For rate limit, wait longer (10s, 20s, 40s)
-                        wait_time = 10 * (2 ** attempt)
-                        logger.warning(f"[GEMINI] Rate limit detected, waiting {wait_time}s before retry...")
-                    else:
-                        wait_time = 2 ** attempt
-                        logger.info(f"[GEMINI] Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-                else:
-                    # Final attempt failed - provide user-friendly error for rate limit
-                    if is_rate_limit:
-                        raise ValueError("API 요청 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
-                    logger.error(f"[GEMINI] All {max_retries} attempts failed")
-                    raise last_error
+                    time.sleep(2 ** attempt)
+                    continue
+
+        logger.error(f"[GEMINI] All {max_retries} attempts failed")
+        raise last_error or Exception("All retries failed")
