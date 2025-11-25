@@ -1054,6 +1054,14 @@ JSON 형식:
    - 예: scene_1의 end_frame = scene_2의 start_frame
    - 이렇게 해야 영상이 끊김 없이 자연스럽게 연결됨
 
+**Kling AI 영상 생성용 필드**:
+- motion_prompt: 시작→끝 프레임 사이의 동작 설명 (영어로, 5-15 단어)
+  - 예: "slowly opens eyes and looks around"
+  - 예: "turns head to the right with a surprised expression"
+- negative_prompt: 피해야 할 요소 (영어로)
+  - 기본값: "blurry, shaky, distorted, low quality, sudden movement"
+  - 씬에 따라 추가 가능: "text, watermark, logo"
+
 JSON 형식 (씬 연결 예시):
 {{
   "mode": "pro",
@@ -1067,6 +1075,8 @@ JSON 형식 (씬 연결 예시):
       "scene_id": "scene_1",
       "start_frame_prompt": "{{char_1}} 창가에 앉아 책을 읽고 있다, 햇살 가득한 방",
       "end_frame_prompt": "{{char_1}} 고개를 들어 창밖을 바라본다, 햇살 가득한 방",
+      "motion_prompt": "slowly lifts head from the book and looks out the window",
+      "negative_prompt": "blurry, shaky, distorted, low quality, sudden movement",
       "text": "오늘도 평화로운 하루",
       "speaker": "narrator",
       "duration_ms": 5000
@@ -1075,6 +1085,8 @@ JSON 형식 (씬 연결 예시):
       "scene_id": "scene_2",
       "start_frame_prompt": "{{char_1}} 고개를 들어 창밖을 바라본다, 햇살 가득한 방",
       "end_frame_prompt": "{{char_1}} 미소 지으며 일어선다, 햇살 가득한 방",
+      "motion_prompt": "smiles gently and stands up from the chair",
+      "negative_prompt": "blurry, shaky, distorted, low quality, sudden movement",
       "text": "무언가 좋은 일이 있을 것 같아",
       "speaker": "char_1",
       "duration_ms": 5000
