@@ -1,16 +1,23 @@
-# Frontend Dockerfile - Multi-stage build for Cloud Run
+# Frontend Dockerfile - Multi-stage build for Railway
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Hardcode API URL for production build
-ENV VITE_API_URL=https://kurz-backend-233920104122.asia-northeast3.run.app
+# API URL is set via Railway environment variable at build time
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
 
-# Copy all files first
+# Copy package files first for better caching
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source files
 COPY . .
 
-# Clean install and build using npx to avoid symlink issues
-RUN rm -rf node_modules && npm install && npx tsc -b && npx vite build
+# Build (uses VITE_API_URL from env)
+RUN npx tsc -b && npx vite build
 
 # Production stage with nginx
 FROM nginx:alpine
@@ -21,7 +28,8 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Cloud Run uses port 8080
-EXPOSE 8080
+# Railway uses PORT env variable (defaults to 8080)
+ARG PORT=8080
+EXPOSE ${PORT}
 
 CMD ["nginx", "-g", "daemon off;"]
