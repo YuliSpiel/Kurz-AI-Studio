@@ -19,14 +19,30 @@ def plot_to_csv(plot_data: Dict, mode: str = "general") -> str:
 
     Args:
         plot_data: Plot JSON data
-        mode: "general" or "story"
+        mode: "general", "story", or "pro"
 
     Returns:
         CSV string representation of plot
     """
     output = StringIO()
 
-    if mode == "general":
+    if mode == "pro":
+        # Pro Mode: scene_id, start_frame_prompt, end_frame_prompt, text, speaker, duration_ms
+        fieldnames = ["scene_id", "start_frame_prompt", "end_frame_prompt", "text", "speaker", "duration_ms"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for scene in plot_data.get("scenes", []):
+            writer.writerow({
+                "scene_id": scene.get("scene_id", ""),
+                "start_frame_prompt": scene.get("start_frame_prompt", ""),
+                "end_frame_prompt": scene.get("end_frame_prompt", ""),
+                "text": scene.get("text", ""),
+                "speaker": scene.get("speaker", ""),
+                "duration_ms": scene.get("duration_ms", 5000)
+            })
+
+    elif mode == "general":
         # General Mode: scene_id, image_prompt, text, speaker, duration_ms
         fieldnames = ["scene_id", "image_prompt", "text", "speaker", "duration_ms"]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -76,7 +92,7 @@ def csv_to_plot(csv_content: str, mode: str = "general", original_plot: Dict = N
 
     Args:
         csv_content: CSV string from user
-        mode: "general" or "story"
+        mode: "general", "story", or "pro"
         original_plot: Original plot data (to preserve bgm_prompt, etc.)
 
     Returns:
@@ -87,7 +103,16 @@ def csv_to_plot(csv_content: str, mode: str = "general", original_plot: Dict = N
 
     scenes = []
     for row in reader:
-        if mode == "general":
+        if mode == "pro":
+            scene = {
+                "scene_id": row.get("scene_id", ""),
+                "start_frame_prompt": row.get("start_frame_prompt", ""),
+                "end_frame_prompt": row.get("end_frame_prompt", ""),
+                "text": row.get("text", ""),
+                "speaker": row.get("speaker", "char_1"),
+                "duration_ms": int(row.get("duration_ms", 5000))
+            }
+        elif mode == "general":
             scene = {
                 "scene_id": row.get("scene_id", ""),
                 "image_prompt": row.get("image_prompt", ""),
@@ -105,6 +130,15 @@ def csv_to_plot(csv_content: str, mode: str = "general", original_plot: Dict = N
                 "speaker": row.get("speaker", ""),
                 "text": row.get("text", ""),
                 "background_img": row.get("background_img", ""),
+                "duration_ms": int(row.get("duration_ms", 5000))
+            }
+        else:
+            # Default to general mode structure
+            scene = {
+                "scene_id": row.get("scene_id", ""),
+                "image_prompt": row.get("image_prompt", ""),
+                "text": row.get("text", ""),
+                "speaker": row.get("speaker", "char_1"),
                 "duration_ms": int(row.get("duration_ms", 5000))
             }
 
@@ -130,7 +164,7 @@ def save_plot_csv(run_id: str, plot_data: Dict, mode: str = "general") -> Path:
     Args:
         run_id: Run identifier
         plot_data: Plot JSON data
-        mode: "general" or "story"
+        mode: "general", "story", or "pro"
 
     Returns:
         Path to saved CSV file
@@ -154,7 +188,7 @@ def load_and_update_plot(run_id: str, csv_content: str, mode: str = "general") -
     Args:
         run_id: Run identifier
         csv_content: CSV string from user
-        mode: "general" or "story"
+        mode: "general", "story", or "pro"
 
     Returns:
         Path to updated plot.json

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { enhancePrompt, createRun, PromptEnhancementResult, getPlotJson, confirmPlot, regeneratePlot, PlotJsonData, Character } from '../api/client'
 
 interface HeroChatProps {
-  onSubmit: (prompt: string, mode: 'general' | 'pro') => void
   onEnhancementReady?: (enhancement: PromptEnhancementResult, originalPrompt: string) => void
   onRunCreated?: (runId: string, reviewMode: boolean, minimized?: boolean) => void
   disabled?: boolean
@@ -29,9 +28,12 @@ const MODE_CONFIG: Record<'general' | 'pro', {
 
 interface Scene {
   scene_id: string
-  image_prompt: string
+  image_prompt?: string  // General mode
+  start_frame_prompt?: string  // Pro mode
+  end_frame_prompt?: string  // Pro mode
   text: string
   speaker: string
+  duration_ms?: number
 }
 
 const ROTATING_WORDS = ['Epic', 'Cool', 'Fire', 'Viral', 'Neat', 'Bold']
@@ -42,7 +44,7 @@ const PLACEHOLDERS: Record<'general' | 'pro', string[]> = {
   pro: ['소꿉친구랑 결혼 골인한 이야기', '아기 고양이의 우주 모험'],
 }
 
-function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
+function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
   const [prompt, setPrompt] = useState('')
   const [selectedMode, setSelectedMode] = useState<'general' | 'pro'>('general')
   const [currentWordIndex, setCurrentWordIndex] = useState(0)
@@ -170,46 +172,40 @@ function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCrea
     e.preventDefault()
     if (!prompt.trim() || disabled) return
 
-    // For general mode, trigger AI enhancement
-    if (selectedMode === 'general') {
-      // Prevent duplicate calls while already enhancing
-      if (isEnhancing) {
-        console.log('[ENHANCE] Already enhancing, ignoring duplicate call')
-        return
+    // Prevent duplicate calls while already enhancing
+    if (isEnhancing) {
+      console.log('[ENHANCE] Already enhancing, ignoring duplicate call')
+      return
+    }
+
+    // Show modal immediately with loading state
+    setShowEnhancementModal(true)
+    setIsEnhancing(true)
+
+    try {
+      console.log(`[ENHANCE] Requesting AI analysis for ${selectedMode} mode...`)
+      const result = await enhancePrompt(prompt, selectedMode)
+
+      // Check if this is a fallback response (contains error message in reasoning)
+      if (result.reasoning && (result.reasoning.includes('AI 분석 실패') || result.reasoning.includes('시스템 오류'))) {
+        console.warn('[ENHANCE] Received fallback response from backend:', result.reasoning)
+        // Still show the result - backend already provided fallback values
       }
 
-      // Show modal immediately with loading state
-      setShowEnhancementModal(true)
-      setIsEnhancing(true)
+      setEnhancementResult(result)
+      setIsEnhancing(false)
+      return // 성공
+    } catch (error: any) {
+      console.error('[ENHANCE] Network or parse error:', error)
 
-      try {
-        console.log('[ENHANCE] Requesting AI analysis...')
-        const result = await enhancePrompt(prompt, 'general')
+      // Network completely failed - backend didn't respond
+      // This should be very rare since backend has its own fallback
+      setIsEnhancing(false)
+      setShowEnhancementModal(false)
 
-        // Check if this is a fallback response (contains error message in reasoning)
-        if (result.reasoning && (result.reasoning.includes('AI 분석 실패') || result.reasoning.includes('시스템 오류'))) {
-          console.warn('[ENHANCE] Received fallback response from backend:', result.reasoning)
-          // Still show the result - backend already provided fallback values
-        }
-
-        setEnhancementResult(result)
-        setIsEnhancing(false)
-        return // 성공
-      } catch (error: any) {
-        console.error('[ENHANCE] Network or parse error:', error)
-
-        // Network completely failed - backend didn't respond
-        // This should be very rare since backend has its own fallback
-        setIsEnhancing(false)
-        setShowEnhancementModal(false)
-
-        // Show error modal instead of alert
-        setEnhanceError(error?.message || String(error))
-        setShowEnhanceErrorModal(true)
-      }
-    } else {
-      // For story/ad modes, proceed directly
-      onSubmit(prompt, selectedMode)
+      // Show error modal instead of alert
+      setEnhanceError(error?.message || String(error))
+      setShowEnhanceErrorModal(true)
     }
   }
 
@@ -1023,22 +1019,62 @@ function HeroChat({ onSubmit, onEnhancementReady: _onEnhancementReady, onRunCrea
                                   </button>
                                 </div>
 
-                                <div style={{ marginBottom: '12px' }}>
-                                  <label style={{
-                                    display: 'block', fontSize: '13px', fontWeight: '600',
-                                    color: '#4B5563', marginBottom: '6px'
-                                  }}>🖼️ 이미지 프롬프트</label>
-                                  <textarea
-                                    value={scene.image_prompt}
-                                    onChange={(e) => handleSceneEdit(scene.scene_id, 'image_prompt', e.target.value)}
-                                    placeholder="이미지 설명을 입력하세요. 비워두면 이전 장면의 이미지가 재사용됩니다."
-                                    style={{
-                                      width: '100%', padding: '8px 10px', fontSize: '14px',
-                                      border: '1px solid #D1D5DB', borderRadius: '4px', resize: 'vertical'
-                                    }}
-                                    rows={3}
-                                  />
-                                </div>
+                                {/* Conditional rendering based on mode */}
+                                {plotData?.mode === 'pro' ? (
+                                  // Pro mode: start_frame_prompt and end_frame_prompt
+                                  <>
+                                    <div style={{ marginBottom: '12px' }}>
+                                      <label style={{
+                                        display: 'block', fontSize: '13px', fontWeight: '600',
+                                        color: '#4B5563', marginBottom: '6px'
+                                      }}>🎬 시작 프레임 프롬프트</label>
+                                      <textarea
+                                        value={scene.start_frame_prompt || ''}
+                                        onChange={(e) => handleSceneEdit(scene.scene_id, 'start_frame_prompt', e.target.value)}
+                                        placeholder="영상의 시작 프레임을 묘사하세요. (예: 주인공이 카페에 앉아 창밖을 바라보고 있다)"
+                                        style={{
+                                          width: '100%', padding: '8px 10px', fontSize: '14px',
+                                          border: '1px solid #D1D5DB', borderRadius: '4px', resize: 'vertical'
+                                        }}
+                                        rows={3}
+                                      />
+                                    </div>
+                                    <div style={{ marginBottom: '12px' }}>
+                                      <label style={{
+                                        display: 'block', fontSize: '13px', fontWeight: '600',
+                                        color: '#4B5563', marginBottom: '6px'
+                                      }}>🎬 종료 프레임 프롬프트</label>
+                                      <textarea
+                                        value={scene.end_frame_prompt || ''}
+                                        onChange={(e) => handleSceneEdit(scene.scene_id, 'end_frame_prompt', e.target.value)}
+                                        placeholder="영상의 종료 프레임을 묘사하세요. (예: 주인공이 미소를 지으며 커피를 마신다)"
+                                        style={{
+                                          width: '100%', padding: '8px 10px', fontSize: '14px',
+                                          border: '1px solid #D1D5DB', borderRadius: '4px', resize: 'vertical'
+                                        }}
+                                        rows={3}
+                                      />
+                                    </div>
+                                  </>
+                                ) : (
+                                  // General mode: image_prompt
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <label style={{
+                                      display: 'block', fontSize: '13px', fontWeight: '600',
+                                      color: '#4B5563', marginBottom: '6px'
+                                    }}>🖼️ 이미지 프롬프트</label>
+                                    <textarea
+                                      value={scene.image_prompt || ''}
+                                      onChange={(e) => handleSceneEdit(scene.scene_id, 'image_prompt', e.target.value)}
+                                      placeholder="이미지 설명을 입력하세요. 비워두면 이전 장면의 이미지가 재사용됩니다."
+                                      style={{
+                                        width: '100%', padding: '8px 10px', fontSize: '14px',
+                                        border: '1px solid #D1D5DB', borderRadius: '4px', resize: 'vertical'
+                                      }}
+                                      rows={3}
+                                    />
+                                  </div>
+                                )}
 
                                 <div style={{ marginBottom: '12px' }}>
                                   <label style={{

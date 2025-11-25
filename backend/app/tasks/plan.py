@@ -233,8 +233,9 @@ def plan_task(self, run_id: str, spec: dict):
             characters_path, plot_json_path = generate_plot_pro_mode(
                 run_id=run_id,
                 prompt=spec["prompt"],
-                num_characters=spec.get("num_characters", 2),
                 num_cuts=spec.get("num_cuts", 5),  # Pro mode default: 5 scenes (25 seconds)
+                narrative_tone=spec.get("narrative_tone"),
+                plot_structure=spec.get("plot_structure")
             )
             logger.info(f"[{run_id}] [PRO MODE] Characters generated: {characters_path}")
             logger.info(f"[{run_id}] [PRO MODE] Plot JSON generated: {plot_json_path}")

@@ -16,6 +16,7 @@ class RunMode(str, enum.Enum):
     GENERAL = "general"
     STORY = "story"
     AD = "ad"
+    PRO = "pro"
 
 
 class RunState(str, enum.Enum):

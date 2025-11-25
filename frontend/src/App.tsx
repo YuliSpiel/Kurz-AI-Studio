@@ -77,11 +77,6 @@ function App() {
     setViewMode('library')
   }
 
-  const handleHeroChatSubmit = (_prompt: string, mode: 'general' | 'pro') => {
-    setAppMode(mode)
-    setShowDetailedForm(true)
-  }
-
   const handleEnhancementReady = (enhancement: PromptEnhancementResult, originalPrompt: string) => {
     setEnhancementData({ enhancement, originalPrompt })
     setAppMode('general')
@@ -170,7 +165,6 @@ function App() {
           <>
             {!currentRunId && !completedRun && !showDetailedForm && (
               <HeroChat
-                onSubmit={handleHeroChatSubmit}
                 onEnhancementReady={handleEnhancementReady}
                 onRunCreated={handleRunCreated}
                 disabled={!!currentRunId || !!completedRun}

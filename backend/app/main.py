@@ -371,8 +371,8 @@ async def enhance_prompt_endpoint(request: dict):
     if not original_prompt:
         raise HTTPException(status_code=400, detail="original_prompt is required")
 
-    if mode not in ["general", "story", "ad"]:
-        raise HTTPException(status_code=400, detail="mode must be 'general', 'story', or 'ad'")
+    if mode not in ["general", "story", "ad", "pro"]:
+        raise HTTPException(status_code=400, detail="mode must be 'general', 'story', 'ad', or 'pro'")
 
     try:
         logger.info(f"[ENHANCE] Enhancing prompt for mode={mode}: '{original_prompt[:50]}...'")
@@ -566,6 +566,20 @@ async def confirm_plot(
                     layout_data = json.load(f)
                     spec = layout_data.get("spec", {})
 
+        # Get mode from spec, fallback to plot.json if not in spec
+        mode = spec.get("mode")
+        if not mode:
+            # Try to read mode from plot.json (Pro mode stores mode in plot.json)
+            try:
+                with open(plot_json_path, 'r', encoding='utf-8') as f:
+                    plot_data = json.load(f)
+                    mode = plot_data.get("mode", "general")
+                    logger.info(f"[{run_id}] Mode loaded from plot.json: {mode}")
+            except Exception as e:
+                logger.warning(f"[{run_id}] Could not read mode from plot.json: {e}")
+                mode = "general"
+        logger.info(f"[{run_id}] Mode detected: {mode}")
+
         # If user edited plot, update plot.json and regenerate layout.json
         if request and "edited_plot" in request:
             edited_plot = request["edited_plot"]
@@ -576,76 +590,105 @@ async def confirm_plot(
 
             logger.info(f"[{run_id}] Updated plot.json from user edits")
 
-            # Regenerate layout.json from updated plot.json
-            from app.utils.json_converter import convert_plot_to_json
+            # Pro mode: Skip layout.json conversion (uses plot.json directly)
+            if mode != "pro":
+                # Regenerate layout.json from updated plot.json
+                from app.utils.json_converter import convert_plot_to_json
 
-            characters_data = None
-            if Path(characters_json_path).exists():
-                with open(characters_json_path, 'r', encoding='utf-8') as f:
-                    characters_data = json.load(f)
+                characters_data = None
+                if Path(characters_json_path).exists():
+                    with open(characters_json_path, 'r', encoding='utf-8') as f:
+                        characters_data = json.load(f)
 
-            # Update plot.json with edited characters if they exist
-            if "characters" in edited_plot:
-                # Update appearance field in characters.json from description in edited_plot
-                updated_characters_list = []
-                for char in edited_plot["characters"]:
-                    char_copy = {
-                        "char_id": char["char_id"],
-                        "name": char["name"],
-                        "appearance": char.get("description", ""),  # Map description -> appearance
-                    }
-                    # Preserve voice_id and seed if they exist in original characters.json
-                    if characters_data:
-                        for orig_char in characters_data.get("characters", []):
-                            if orig_char["char_id"] == char["char_id"]:
-                                char_copy["voice_id"] = orig_char.get("voice_id")
-                                char_copy["seed"] = orig_char.get("seed")
-                                break
-                    updated_characters_list.append(char_copy)
+                # Update plot.json with edited characters if they exist
+                if "characters" in edited_plot:
+                    # Update appearance field in characters.json from description in edited_plot
+                    updated_characters_list = []
+                    for char in edited_plot["characters"]:
+                        char_copy = {
+                            "char_id": char["char_id"],
+                            "name": char["name"],
+                            "appearance": char.get("description", ""),  # Map description -> appearance
+                        }
+                        # Preserve voice_id and seed if they exist in original characters.json
+                        if characters_data:
+                            for orig_char in characters_data.get("characters", []):
+                                if orig_char["char_id"] == char["char_id"]:
+                                    char_copy["voice_id"] = orig_char.get("voice_id")
+                                    char_copy["seed"] = orig_char.get("seed")
+                                    break
+                        updated_characters_list.append(char_copy)
 
-                updated_characters = {"characters": updated_characters_list}
-                with open(characters_json_path, 'w', encoding='utf-8') as f:
-                    json.dump(updated_characters, f, indent=2, ensure_ascii=False)
-                logger.info(f"[{run_id}] Updated characters.json from edited plot")
+                    updated_characters = {"characters": updated_characters_list}
+                    with open(characters_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(updated_characters, f, indent=2, ensure_ascii=False)
+                    logger.info(f"[{run_id}] Updated characters.json from edited plot")
 
-            # Convert plot.json to layout.json
-            layout_path = convert_plot_to_json(
-                plot_json_path=str(plot_json_path),
-                run_id=run_id,
-                art_style=spec.get("art_style", "파스텔 수채화"),
-                music_genre=spec.get("music_genre", "ambient"),
-                video_title=spec.get("video_title"),
-                layout_config=spec.get("layout_config"),
-                review_mode=spec.get("review_mode", False)
-            )
+                # Convert plot.json to layout.json
+                layout_path = convert_plot_to_json(
+                    plot_json_path=str(plot_json_path),
+                    run_id=run_id,
+                    art_style=spec.get("art_style", "파스텔 수채화"),
+                    music_genre=spec.get("music_genre", "ambient"),
+                    video_title=spec.get("video_title"),
+                    layout_config=spec.get("layout_config"),
+                    review_mode=spec.get("review_mode", False)
+                )
 
-            # Update runs if in memory
-            if run_id in runs:
-                runs[run_id]["artifacts"]["json_path"] = str(layout_path)
+                # Update runs if in memory
+                if run_id in runs:
+                    runs[run_id]["artifacts"]["json_path"] = str(layout_path)
 
-            logger.info(f"[{run_id}] Regenerated layout.json from edited plot")
+                logger.info(f"[{run_id}] Regenerated layout.json from edited plot")
+            else:
+                logger.info(f"[{run_id}] [PRO MODE] Skipping layout.json conversion (uses plot.json directly)")
 
         # Transition to ASSET_GENERATION
         publish_progress(run_id, progress=0.25, log="플롯 확정 - 에셋 생성 시작...")
         if fsm.transition_to(RunState.ASSET_GENERATION):
             logger.info(f"[{run_id}] Plot confirmed, transitioning to ASSET_GENERATION")
-            publish_progress(run_id, state="ASSET_GENERATION", progress=0.3, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
 
             # Update state in memory if run exists
             if run_id in runs:
                 runs[run_id]["state"] = fsm.current_state.value
 
-            # Use layout_json_path from above (already determined)
-            json_path_str = str(layout_json_path)
+            if mode == "pro":
+                # Pro Mode: Use Pro-specific tasks and skip LAYOUT_REVIEW
+                from app.tasks.designer import designer_task_pro
+                from app.tasks.voice import voice_task_pro
+                from app.tasks.director import director_task_pro
 
-            asset_tasks = group(
-                designer_task.s(run_id, json_path_str, spec),
-                composer_task.s(run_id, json_path_str, spec),
-                voice_task.s(run_id, json_path_str, spec),
-            )
+                logger.info(f"[{run_id}] [PRO MODE] Starting Pro mode asset generation...")
+                publish_progress(run_id, state="ASSET_GENERATION", progress=0.3, log="Pro 모드 에셋 생성 시작 (디자이너, 작곡가, 성우)")
 
-            workflow = chord(asset_tasks)(layout_ready_task.s(run_id, json_path_str))
-            logger.info(f"[{run_id}] Asset generation chord started (will transition to LAYOUT_REVIEW)")
+                # Pro mode uses plot.json directly, not layout.json
+                json_path_str = str(plot_json_path)
+
+                # Create chord: parallel tasks → director_pro callback
+                asset_tasks = group(
+                    designer_task_pro.s(run_id, json_path_str, spec),
+                    composer_task.s(run_id, json_path_str, spec),
+                    voice_task_pro.s(run_id, json_path_str, spec),
+                )
+
+                # Chord: when all complete, trigger Pro director (skips LAYOUT_REVIEW)
+                workflow = chord(asset_tasks)(director_task_pro.s(run_id, json_path_str))
+                logger.info(f"[{run_id}] [PRO MODE] Pro asset generation chord started (will go directly to RENDERING)")
+            else:
+                # General Mode: Use standard tasks with LAYOUT_REVIEW
+                publish_progress(run_id, state="ASSET_GENERATION", progress=0.3, log="에셋 생성 시작 (디자이너, 작곡가, 성우)")
+
+                # Use layout_json_path from above (already determined)
+                json_path_str = str(layout_json_path)
+
+                asset_tasks = group(
+                    designer_task.s(run_id, json_path_str, spec),
+                    composer_task.s(run_id, json_path_str, spec),
+                    voice_task.s(run_id, json_path_str, spec),
+                )
+
+                workflow = chord(asset_tasks)(layout_ready_task.s(run_id, json_path_str))
+                logger.info(f"[{run_id}] Asset generation chord started (will transition to LAYOUT_REVIEW)")
 
             return {
                 "status": "success",
