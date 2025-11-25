@@ -721,7 +721,15 @@ def designer_task(self, run_id: str, json_path: str, spec: dict):
 @celery.task(bind=True, name="tasks.designer_pro")
 def designer_task_pro(self, run_id: str, json_path: str, spec: dict):
     """
-    Generate images for Pro mode scenes (2 images per scene: start + end frame).
+    Generate images for Pro mode scenes with optimized image reuse.
+
+    Key optimization: Scene N's end_frame == Scene N+1's start_frame
+    This reduces total image generation by reusing end frames as next start frames.
+
+    Flow:
+    - Scene 1: Generate start_image, end_image
+    - Scene 2: Reuse Scene 1's end as start, generate new end_image
+    - Scene N: Reuse Scene N-1's end as start, generate new end_image
 
     Args:
         run_id: Run identifier
@@ -757,10 +765,16 @@ def designer_task_pro(self, run_id: str, json_path: str, spec: dict):
                 characters_data = json.load(f)
             logger.info(f"[{run_id}] Loaded characters.json for appearance data")
 
-            # Build character description lookup
+            # Build character description lookup from plot.json characters (Pro mode)
+            for char in plot.get("characters", []):
+                if char.get("description"):
+                    char_descriptions[char["char_id"]] = char["description"]
+
+            # Also check characters.json for appearance field
             for char in characters_data.get("characters", []):
-                if char.get("appearance"):
+                if char.get("appearance") and char["char_id"] not in char_descriptions:
                     char_descriptions[char["char_id"]] = char["appearance"]
+
             logger.info(f"[{run_id}] [TEMPLATE] Loaded {len(char_descriptions)} character descriptions")
 
         def substitute_char_variables(prompt: str) -> str:
@@ -789,56 +803,97 @@ def designer_task_pro(self, run_id: str, json_path: str, spec: dict):
 
         image_results = []
         output_dir = Path(json_path).parent
+        images_dir = output_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
         art_style = spec.get('art_style', '파스텔 수채화')
 
-        # Generate images for each scene (2 per scene: start + end)
+        # Generate images for each scene with optimization
+        # Scene N's end = Scene N+1's start (to avoid duplicate generation)
         scenes = plot.get("scenes", [])
-        total_images = len(scenes) * 2
+
+        # Calculate total images: first scene = 2, rest = 1 each (reusing previous end as start)
+        total_images = 1 + len(scenes)  # 1 start + N end images
         generated_count = 0
+        previous_end_image = None
 
-        for scene in scenes:
+        for idx, scene in enumerate(scenes):
             scene_id = scene["scene_id"]
-            logger.info(f"[{run_id}] Pro mode: Generating images for {scene_id}...")
+            logger.info(f"[{run_id}] Pro mode: Processing {scene_id} ({idx + 1}/{len(scenes)})...")
 
-            # Generate start frame
+            # Start frame handling
             start_prompt = scene.get("start_frame_prompt", "")
-            if start_prompt:
-                start_prompt = substitute_char_variables(start_prompt)
-                start_prompt = f"{art_style}, {start_prompt}, no text, no speech bubbles, no Korean text"
-                start_image_path = _generate_pro_image(
-                    client=client,
-                    run_id=run_id,
-                    scene_id=scene_id,
-                    frame_type="start",
-                    prompt=start_prompt,
-                    output_dir=output_dir,
-                    stub_mode=stub_mode
-                )
-                scene["start_image_url"] = str(start_image_path)
-                image_results.append({
-                    "scene_id": scene_id,
-                    "frame_type": "start",
-                    "image_url": str(start_image_path)
-                })
-                generated_count += 1
-                progress = 0.3 + (0.15 * generated_count / total_images)
-                publish_progress(run_id, progress=progress, log=f"디자이너: {scene_id} 시작 프레임 생성 완료")
+            if idx == 0:
+                # First scene: Generate start frame
+                if start_prompt:
+                    start_prompt_full = substitute_char_variables(start_prompt)
+                    start_prompt_full = f"{art_style}, {start_prompt_full}, no text, no speech bubbles, no Korean text"
+                    start_image_path = _generate_pro_image(
+                        client=client,
+                        run_id=run_id,
+                        scene_id=scene_id,
+                        frame_type="start",
+                        prompt=start_prompt_full,
+                        output_dir=images_dir,
+                        stub_mode=stub_mode
+                    )
+                    scene["start_image_url"] = str(start_image_path)
+                    image_results.append({
+                        "scene_id": scene_id,
+                        "frame_type": "start",
+                        "image_url": str(start_image_path)
+                    })
+                    generated_count += 1
+                    progress = 0.3 + (0.15 * generated_count / total_images)
+                    publish_progress(run_id, progress=progress, log=f"디자이너: {scene_id} 시작 프레임 생성 완료")
+            else:
+                # Subsequent scenes: Reuse previous scene's end frame as start
+                if previous_end_image:
+                    logger.info(f"[{run_id}] ✓ Reusing previous end frame as {scene_id} start frame")
+                    scene["start_image_url"] = previous_end_image
+                    image_results.append({
+                        "scene_id": scene_id,
+                        "frame_type": "start",
+                        "image_url": previous_end_image,
+                        "reused": True
+                    })
+                else:
+                    # Fallback: Generate if no previous end image
+                    logger.warning(f"[{run_id}] No previous end image, generating start frame for {scene_id}")
+                    start_prompt_full = substitute_char_variables(start_prompt)
+                    start_prompt_full = f"{art_style}, {start_prompt_full}, no text, no speech bubbles, no Korean text"
+                    start_image_path = _generate_pro_image(
+                        client=client,
+                        run_id=run_id,
+                        scene_id=scene_id,
+                        frame_type="start",
+                        prompt=start_prompt_full,
+                        output_dir=images_dir,
+                        stub_mode=stub_mode
+                    )
+                    scene["start_image_url"] = str(start_image_path)
+                    image_results.append({
+                        "scene_id": scene_id,
+                        "frame_type": "start",
+                        "image_url": str(start_image_path)
+                    })
+                    generated_count += 1
 
-            # Generate end frame
+            # End frame: Always generate (will be reused as next start)
             end_prompt = scene.get("end_frame_prompt", "")
             if end_prompt:
-                end_prompt = substitute_char_variables(end_prompt)
-                end_prompt = f"{art_style}, {end_prompt}, no text, no speech bubbles, no Korean text"
+                end_prompt_full = substitute_char_variables(end_prompt)
+                end_prompt_full = f"{art_style}, {end_prompt_full}, no text, no speech bubbles, no Korean text"
                 end_image_path = _generate_pro_image(
                     client=client,
                     run_id=run_id,
                     scene_id=scene_id,
                     frame_type="end",
-                    prompt=end_prompt,
-                    output_dir=output_dir,
+                    prompt=end_prompt_full,
+                    output_dir=images_dir,
                     stub_mode=stub_mode
                 )
                 scene["end_image_url"] = str(end_image_path)
+                previous_end_image = str(end_image_path)  # Cache for next scene's start
                 image_results.append({
                     "scene_id": scene_id,
                     "frame_type": "end",
@@ -852,8 +907,12 @@ def designer_task_pro(self, run_id: str, json_path: str, spec: dict):
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(plot, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"[{run_id}] Designer Pro: Completed {len(image_results)} images")
-        publish_progress(run_id, progress=0.45, log=f"디자이너: Pro 모드 이미지 생성 완료 ({len(image_results)}개)")
+        # Count actual generated vs reused images
+        reused_count = sum(1 for r in image_results if r.get("reused"))
+        actual_generated = len(image_results) - reused_count
+
+        logger.info(f"[{run_id}] Designer Pro: Completed {len(image_results)} images ({actual_generated} generated, {reused_count} reused)")
+        publish_progress(run_id, progress=0.45, log=f"디자이너: Pro 모드 이미지 완료 ({actual_generated}개 생성, {reused_count}개 재사용)")
 
         # Update progress
         from app.main import runs

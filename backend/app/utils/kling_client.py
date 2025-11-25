@@ -1,23 +1,32 @@
 """
 Kling AI API Client for Pro Mode video generation.
 Uses Image-to-Video API to generate 5-second videos from start/end frames.
+
+Recommended settings:
+- Model: kling-v1-6 (195% better than v1.5)
+- Mode: pro (1080p quality, ~2 min generation time)
 """
 import httpx
 import asyncio
 import time
 import jwt
 import base64
+import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
-from app.utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Kling API endpoints
 KLING_API_BASE = "https://api.klingai.com"
 KLING_IMAGE_TO_VIDEO_ENDPOINT = "/v1/videos/image2video"
 KLING_TASK_STATUS_ENDPOINT = "/v1/videos/image2video"
+
+# Model versions
+KLING_MODEL_V1 = "kling-v1"
+KLING_MODEL_V1_5 = "kling-v1-5"
+KLING_MODEL_V1_6 = "kling-v1-6"  # Recommended: 195% better than v1.5
 
 
 class KlingClient:
@@ -53,7 +62,10 @@ class KlingClient:
         end_image_path: str,
         output_path: str,
         prompt: Optional[str] = None,
-        negative_prompt: Optional[str] = None,
+        negative_prompt: Optional[str] = "blurry, shaky, distorted, low quality, sudden movement",
+        model: str = KLING_MODEL_V1_6,
+        mode: str = "pro",
+        cfg_scale: float = 0.5,
     ) -> str:
         """
         Generate video from start and end frames using Kling AI.
@@ -62,15 +74,20 @@ class KlingClient:
             start_image_path: Path to the start frame image
             end_image_path: Path to the end frame image
             output_path: Path to save the generated video
-            prompt: Optional text prompt for video generation
-            negative_prompt: Optional negative prompt
+            prompt: Optional motion prompt (English recommended)
+            negative_prompt: Elements to avoid in generation
+            model: Model version (kling-v1, kling-v1-5, kling-v1-6)
+            mode: Quality mode ("std" for 720p, "pro" for 1080p)
+            cfg_scale: Prompt adherence (0.0-1.0)
 
         Returns:
             Path to the generated video file
         """
-        logger.info(f"[Kling] Starting image-to-video generation")
+        logger.info(f"[Kling] Starting image-to-video generation (model={model}, mode={mode})")
         logger.info(f"[Kling] Start image: {start_image_path}")
         logger.info(f"[Kling] End image: {end_image_path}")
+        if prompt:
+            logger.info(f"[Kling] Motion prompt: {prompt[:50]}...")
 
         # Generate auth token
         token = self._generate_jwt_token()
@@ -81,12 +98,12 @@ class KlingClient:
 
         # Prepare request payload
         payload = {
-            "model_name": "kling-v1",
+            "model_name": model,
             "image": start_image_b64,
             "image_tail": end_image_b64,  # End frame
             "duration": str(self.video_duration),  # "5" or "10"
-            "mode": "std",  # "std" or "pro"
-            "cfg_scale": 0.5,
+            "mode": mode,  # "std" (720p) or "pro" (1080p)
+            "cfg_scale": cfg_scale,
         }
 
         if prompt:
@@ -113,7 +130,7 @@ class KlingClient:
                 raise Exception(f"Kling API error: {response.status_code}")
 
             result = response.json()
-            logger.info(f"[Kling] Task submitted: {result}")
+            logger.info(f"[Kling] Task submitted successfully")
 
             if result.get("code") != 0:
                 raise Exception(f"Kling API error: {result.get('message')}")
@@ -125,7 +142,7 @@ class KlingClient:
             video_url = await self._poll_task_status(client, task_id, headers)
 
             # Download video
-            logger.info(f"[Kling] Downloading video from: {video_url}")
+            logger.info(f"[Kling] Downloading video...")
             video_response = await client.get(video_url)
 
             # Save to file
@@ -133,7 +150,7 @@ class KlingClient:
             with open(output_path, "wb") as f:
                 f.write(video_response.content)
 
-            logger.info(f"[Kling] Video saved to: {output_path}")
+            logger.info(f"[Kling] ✓ Video saved to: {output_path}")
             return output_path
 
     async def _poll_task_status(
@@ -142,7 +159,7 @@ class KlingClient:
         task_id: str,
         headers: dict,
         max_attempts: int = 120,
-        poll_interval: int = 5
+        poll_interval: int = 10
     ) -> str:
         """
         Poll task status until completion.
@@ -150,6 +167,7 @@ class KlingClient:
         Returns:
             URL of the generated video
         """
+        last_status = None
         for attempt in range(max_attempts):
             response = await client.get(
                 f"{KLING_API_BASE}{KLING_TASK_STATUS_ENDPOINT}/{task_id}",
@@ -164,7 +182,10 @@ class KlingClient:
             result = response.json()
             status = result.get("data", {}).get("task_status")
 
-            logger.info(f"[Kling] Task status: {status} (attempt {attempt + 1}/{max_attempts})")
+            # Only log when status changes (reduce log spam)
+            if status != last_status:
+                logger.info(f"[Kling] Task status: {status}")
+                last_status = status
 
             if status == "succeed":
                 videos = result["data"].get("task_result", {}).get("videos", [])
