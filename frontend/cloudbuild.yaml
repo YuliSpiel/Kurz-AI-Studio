@@ -1,15 +1,21 @@
-steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'build'
-      - '--build-arg'
-      - 'VITE_API_URL=https://kurz-backend-233920104122.asia-northeast3.run.app'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/kurz-frontend:$COMMIT_SHA'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/kurz-frontend:latest'
-      - '.'
-
-images:
-  - 'gcr.io/$PROJECT_ID/kurz-frontend:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/kurz-frontend:latest'
+# =============================================================================
+# DEPRECATED: GCP Cloud Build configuration
+# Switched to Railway deployment - see deploy/railway/README.md
+# Keeping for reference only
+# =============================================================================
+#
+# steps:
+#   - name: 'gcr.io/cloud-builders/docker'
+#     args:
+#       - 'build'
+#       - '--build-arg'
+#       - 'VITE_API_URL=https://kurz-backend-233920104122.asia-northeast3.run.app'
+#       - '-t'
+#       - 'gcr.io/$PROJECT_ID/kurz-frontend:$COMMIT_SHA'
+#       - '-t'
+#       - 'gcr.io/$PROJECT_ID/kurz-frontend:latest'
+#       - '.'
+#
+# images:
+#   - 'gcr.io/$PROJECT_ID/kurz-frontend:$COMMIT_SHA'
+#   - 'gcr.io/$PROJECT_ID/kurz-frontend:latest'

@@ -1,32 +1,38 @@
-steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'build'
-      - '--no-cache'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/kurz-backend:latest'
-      - '.'
-
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA']
-
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/kurz-backend:latest']
-
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'kurz-backend'
-      - '--image'
-      - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
-      - '--region'
-      - 'asia-northeast3'
-      - '--allow-unauthenticated'
-
-images:
-  - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/kurz-backend:latest'
+# =============================================================================
+# DEPRECATED: GCP Cloud Build configuration
+# Switched to Railway deployment - see deploy/railway/README.md
+# Keeping for reference only
+# =============================================================================
+#
+# steps:
+#   - name: 'gcr.io/cloud-builders/docker'
+#     args:
+#       - 'build'
+#       - '--no-cache'
+#       - '-t'
+#       - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
+#       - '-t'
+#       - 'gcr.io/$PROJECT_ID/kurz-backend:latest'
+#       - '.'
+#
+#   - name: 'gcr.io/cloud-builders/docker'
+#     args: ['push', 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA']
+#
+#   - name: 'gcr.io/cloud-builders/docker'
+#     args: ['push', 'gcr.io/$PROJECT_ID/kurz-backend:latest']
+#
+#   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+#     entrypoint: gcloud
+#     args:
+#       - 'run'
+#       - 'deploy'
+#       - 'kurz-backend'
+#       - '--image'
+#       - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
+#       - '--region'
+#       - 'asia-northeast3'
+#       - '--allow-unauthenticated'
+#
+# images:
+#   - 'gcr.io/$PROJECT_ID/kurz-backend:$COMMIT_SHA'
+#   - 'gcr.io/$PROJECT_ID/kurz-backend:latest'

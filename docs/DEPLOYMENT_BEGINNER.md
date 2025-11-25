@@ -1,4 +1,14 @@
-# Kurz AI Studio 배포 가이드 (초보자용)
+# DEPRECATED - GCP 배포 가이드 (초보자용)
+
+> **이 문서는 더 이상 사용되지 않습니다.**
+>
+> Railway 배포로 전환되었습니다.
+>
+> 새 배포 가이드: [../deploy/railway/README.md](../deploy/railway/README.md)
+
+---
+
+# (참고용) Kurz AI Studio 배포 가이드 (초보자용)
 
 인터넷에 서비스를 올려서 다른 사람들도 쓸 수 있게 만드는 방법입니다.
 

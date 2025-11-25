@@ -1,4 +1,14 @@
-# Kurz AI Studio - Google Cloud Run 배포 가이드
+# DEPRECATED - Google Cloud Run 배포 가이드
+
+> **이 문서는 더 이상 사용되지 않습니다.**
+>
+> Railway 배포로 전환되었습니다.
+>
+> 새 배포 가이드: [../deploy/railway/README.md](../deploy/railway/README.md)
+
+---
+
+# (참고용) Kurz AI Studio - Google Cloud Run 배포 가이드
 
 MVP를 위한 간단한 서버리스 배포 가이드입니다.
 
