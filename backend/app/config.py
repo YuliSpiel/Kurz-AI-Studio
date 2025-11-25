@@ -7,9 +7,9 @@ from typing import Literal
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root
+# Load .env from project root (override=True ensures .env values take precedence)
 env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv(dotenv_path=env_path, override=True)
 
 
 class Settings(BaseSettings):
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # Provider switches
     IMAGE_PROVIDER: Literal["comfyui", "gemini"] = "gemini"
-    TTS_PROVIDER: Literal["elevenlabs", "playht"] = "elevenlabs"
+    TTS_PROVIDER: Literal["elevenlabs", "playht", "minimax"] = "minimax"
     MUSIC_PROVIDER: Literal["elevenlabs", "mubert", "udio", "suno"] = "elevenlabs"
 
     # Model/Prompt settings
@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # External API keys
     OPENAI_API_KEY: str = ""
     ELEVENLABS_API_KEY: str = ""
+
+    # MiniMax TTS
+    MINIMAX_API_KEY: str = ""
+    MINIMAX_GROUP_ID: str = ""
     PLAYHT_API_KEY: str = ""
     PLAYHT_USER_ID: str = ""
     MUBERT_LICENSE: str = ""

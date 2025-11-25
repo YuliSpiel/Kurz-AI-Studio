@@ -4,10 +4,94 @@ Generates characters.json and plot.json from user prompts.
 """
 import logging
 import json
+import re
+import time
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _try_repair_json(json_str: str) -> Optional[str]:
+    """
+    Try to repair truncated JSON by adding missing brackets/braces.
+    Returns repaired JSON string or None if repair fails.
+    """
+    json_str = json_str.strip()
+
+    # Count brackets and braces
+    open_braces = json_str.count('{')
+    close_braces = json_str.count('}')
+    open_brackets = json_str.count('[')
+    close_brackets = json_str.count(']')
+
+    # Add missing closing brackets/braces
+    missing_braces = open_braces - close_braces
+    missing_brackets = open_brackets - close_brackets
+
+    if missing_braces < 0 or missing_brackets < 0:
+        return None  # More closing than opening - can't repair
+
+    # Check for unterminated strings
+    in_string = False
+    escape_next = False
+    for char in json_str:
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\':
+            escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+
+    # If string is unterminated, try to close it
+    if in_string:
+        json_str = json_str + '"'
+
+    # Add missing brackets (brackets before braces)
+    json_str = json_str + (']' * missing_brackets) + ('}' * missing_braces)
+
+    return json_str
+
+
+def _parse_json_with_retry(json_str: str, description: str = "JSON", max_attempts: int = 3) -> dict:
+    """
+    Parse JSON with retry and repair logic.
+
+    Args:
+        json_str: JSON string to parse
+        description: Description for logging
+        max_attempts: Number of repair attempts
+
+    Returns:
+        Parsed JSON dict
+
+    Raises:
+        json.JSONDecodeError: If parsing fails after all attempts
+    """
+    # First try: direct parse
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{description}] Initial JSON parse failed: {e}")
+
+    # Second try: repair and parse
+    for attempt in range(max_attempts):
+        repaired = _try_repair_json(json_str)
+        if repaired:
+            try:
+                result = json.loads(repaired)
+                logger.info(f"[{description}] JSON repaired successfully on attempt {attempt + 1}")
+                return result
+            except json.JSONDecodeError:
+                logger.warning(f"[{description}] Repair attempt {attempt + 1} failed")
+
+    # All attempts failed, raise original error
+    raise json.JSONDecodeError(
+        f"Failed to parse {description} after {max_attempts} repair attempts",
+        json_str, 0
+    )
 
 
 def _is_url(text: str) -> bool:
@@ -99,24 +183,31 @@ def generate_plot_with_characters(
             # Story Mode: Use user-provided characters
             logger.info("Step 1: Using provided characters (Story Mode)...")
 
-            # Load voices.json to match voices by gender
+            # Load voices config based on TTS provider
             import os
             logger.info(f"Plot generator CWD: {os.getcwd()}")
 
             voices_data = {}
-            voices_paths = [Path("voices.json"), Path("../voices.json")]
+            # Use mm_voices.json for MiniMax, voices.json for ElevenLabs/PlayHT
+            if settings.TTS_PROVIDER == "minimax":
+                voices_paths = [Path("mm_voices.json"), Path("../mm_voices.json")]
+                logger.info("[TTS] Using MiniMax voices config")
+            else:
+                voices_paths = [Path("voices.json"), Path("../voices.json")]
+                logger.info(f"[TTS] Using {settings.TTS_PROVIDER} voices config")
+
             for voices_path in voices_paths:
                 abs_path = voices_path.absolute()
                 exists = voices_path.exists()
-                logger.info(f"Checking voices.json at: {abs_path} - exists: {exists}")
+                logger.info(f"Checking voices at: {abs_path} - exists: {exists}")
                 if exists:
                     with open(voices_path, "r", encoding="utf-8") as f:
                         voices_data = json.load(f)
-                    logger.info(f"✅ Loaded voices.json from {voices_path}")
+                    logger.info(f"✅ Loaded voices from {voices_path}")
                     break
 
             if not voices_data:
-                logger.warning("❌ voices.json not found, using default voices")
+                logger.warning("❌ voices config not found, using default voices")
 
             female_voices = voices_data.get("voices", {}).get("female", [])
             male_voices = voices_data.get("voices", {}).get("male", [])
@@ -124,6 +215,9 @@ def generate_plot_with_characters(
             characters_data = {
                 "characters": []
             }
+
+            # Default fallback voice based on TTS provider
+            default_female_voice = "Calm_Woman" if settings.TTS_PROVIDER == "minimax" else "xi3rF0t7dg7uN2M0WUhr"
 
             for i, char in enumerate(characters):
                 gender = char.get("gender", "female")
@@ -139,7 +233,7 @@ def generate_plot_with_characters(
                     logger.info(f"[{char['name']}] Gender: female → Voice: {female_voices[0]['name']} ({voice_id})")
                 else:
                     # Fallback to first female voice
-                    voice_id = female_voices[0]["voice_id"] if female_voices else "xi3rF0t7dg7uN2M0WUhr"
+                    voice_id = female_voices[0]["voice_id"] if female_voices else default_female_voice
                     logger.warning(f"[{char['name']}] Gender: {gender} → Using fallback female voice")
 
                 characters_data["characters"].append({
@@ -158,24 +252,31 @@ def generate_plot_with_characters(
             logger.info(f"✅ Characters saved with gender-matched voices: {characters_path}")
         else:
             # Auto-generate characters
-            # Load voices.json for voice selection
+            # Load voices config based on TTS provider
             import os
             logger.info(f"Plot generator CWD (auto-gen): {os.getcwd()}")
 
             voices_data = {}
-            voices_paths = [Path("voices.json"), Path("../voices.json")]
+            # Use mm_voices.json for MiniMax, voices.json for ElevenLabs/PlayHT
+            if settings.TTS_PROVIDER == "minimax":
+                voices_paths = [Path("mm_voices.json"), Path("../mm_voices.json")]
+                logger.info("[TTS] Using MiniMax voices config (auto-gen)")
+            else:
+                voices_paths = [Path("voices.json"), Path("../voices.json")]
+                logger.info(f"[TTS] Using {settings.TTS_PROVIDER} voices config (auto-gen)")
+
             for voices_path in voices_paths:
                 abs_path = voices_path.absolute()
                 exists = voices_path.exists()
-                logger.info(f"Checking voices.json at: {abs_path} - exists: {exists}")
+                logger.info(f"Checking voices at: {abs_path} - exists: {exists}")
                 if exists:
                     with open(voices_path, "r", encoding="utf-8") as f:
                         voices_data = json.load(f)
-                    logger.info(f"✅ Loaded voices.json from {voices_path}")
+                    logger.info(f"✅ Loaded voices from {voices_path}")
                     break
 
             if not voices_data:
-                logger.warning("❌ voices.json not found, using default voices")
+                logger.warning("❌ voices config not found, using default voices")
 
             # Build voice options description
             female_voices = voices_data.get("voices", {}).get("female", [])
@@ -254,8 +355,8 @@ JSON 형식:
                 lines = char_json_content.split("\n")
                 char_json_content = "\n".join([line for line in lines if not line.startswith("```")])
 
-            # Parse and save characters
-            characters_data = json.loads(char_json_content)
+            # Parse and save characters (with retry logic for truncated JSON)
+            characters_data = _parse_json_with_retry(char_json_content, "CHARACTERS")
 
             # Validate and fix voice_id
             valid_voice_ids = [v["voice_id"] for v in female_voices] + [v["voice_id"] for v in male_voices]
@@ -273,8 +374,9 @@ JSON 형식:
                         char["voice_id"] = male_voices[0]["voice_id"] if male_voices else female_voices[0]["voice_id"]
                         logger.info(f"  → Assigned male voice: {char['voice_id']}")
                     else:
-                        # Female voice (default)
-                        char["voice_id"] = female_voices[0]["voice_id"] if female_voices else "xi3rF0t7dg7uN2M0WUhr"
+                        # Female voice (default) - use provider-specific fallback
+                        default_female = "Calm_Woman" if settings.TTS_PROVIDER == "minimax" else "xi3rF0t7dg7uN2M0WUhr"
+                        char["voice_id"] = female_voices[0]["voice_id"] if female_voices else default_female
                         logger.info(f"  → Assigned female voice: {char['voice_id']}")
 
             with open(characters_path, "w", encoding="utf-8") as f:
@@ -616,10 +718,10 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
             plot_json_content = plot_json_content[:-3]
         plot_json_content = plot_json_content.strip()
 
-        # Parse and save plot JSON
+        # Parse and save plot JSON (with retry logic for truncated JSON)
         try:
-            plot_data = json.loads(plot_json_content)
-            logger.info(f"✅ Successfully parsed plot JSON: {len(plot_data.get('scenes', []))} scenes")
+            plot_data = _parse_json_with_retry(plot_json_content, "PLOT")
+            logger.info(f"Successfully parsed plot JSON: {len(plot_data.get('scenes', []))} scenes")
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON parsing failed at position {e.pos}: {e.msg}")
             logger.error(f"Error at line {e.lineno}, column {e.colno}")
@@ -745,6 +847,10 @@ JSON 형식 (예시: 3개 컷을 요청받은 경우):
             ]
             logger.info(f"[TEMPLATE] Added {len(plot_data.get('characters', []))} characters to plot.json for variable substitution")
 
+        # Store mode in plot.json for later retrieval (e.g., after server restart)
+        plot_data["mode"] = mode
+        logger.info(f"[PLOT] Mode '{mode}' stored in plot.json")
+
         with open(plot_path, "w", encoding="utf-8") as f:
             json.dump(plot_data, f, indent=2, ensure_ascii=False)
 
@@ -799,13 +905,20 @@ def generate_plot_pro_mode(
 
     client = GeminiLLMClient(api_key=settings.GEMINI_API_KEY)
 
-    # Load voices for character generation
+    # Load voices config based on TTS provider
     voices_data = {}
-    voices_paths = [Path("voices.json"), Path("../voices.json")]
+    if settings.TTS_PROVIDER == "minimax":
+        voices_paths = [Path("mm_voices.json"), Path("../mm_voices.json")]
+        logger.info("[PRO MODE] Using MiniMax voices config")
+    else:
+        voices_paths = [Path("voices.json"), Path("../voices.json")]
+        logger.info(f"[PRO MODE] Using {settings.TTS_PROVIDER} voices config")
+
     for voices_path in voices_paths:
         if voices_path.exists():
             with open(voices_path, "r", encoding="utf-8") as f:
                 voices_data = json.load(f)
+            logger.info(f"[PRO MODE] Loaded voices from {voices_path}")
             break
 
     female_voices = voices_data.get("voices", {}).get("female", [])
@@ -824,54 +937,75 @@ def generate_plot_pro_mode(
 
 각 캐릭터마다 다음 정보를 JSON 형식으로 제공하세요:
 - char_id: char_1, char_2, ... 형식
-- name: 캐릭터 이름
-- description: 외형 묘사 (이미지 생성용, 매우 상세하게)
-  - 나이, 성별, 헤어스타일, 헤어 색상, 눈 색상, 피부톤, 체형, 의상 등
+- name: 캐릭터 이름 (2-4글자)
+- description: 외형 묘사 (50자 이내로 간결하게! 핵심 특징만)
 - seed: 각 캐릭터마다 고유한 정수 (1000-9999)
+
+**중요**: 반드시 완전한 JSON을 출력하세요. 중간에 끊지 마세요!
 
 JSON 형식:
 {{
   "characters": [
     {{
       "char_id": "char_1",
-      "name": "캐릭터 이름",
-      "description": "25세 여성, 긴 검은 머리, 파란 눈동자, 밝은 피부, 흰색 티셔츠",
+      "name": "이름",
+      "description": "갈색 털의 카피바라, 온화한 눈, 둥근 체형",
       "seed": 1001
     }}
   ]
 }}"""
 
     logger.info("[PRO MODE] Step 1: Generating characters...")
-    char_response = client.generate_text(
-        messages=[
-            {"role": "system", "content": char_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.9,
-        max_tokens=2000,
-        json_mode=True
-    )
 
-    char_json = char_response.strip()
-    if char_json.startswith("```"):
-        lines = char_json.split("\n")
-        char_json = "\n".join([l for l in lines if not l.startswith("```")])
+    # Retry logic for character generation (Gemini sometimes returns truncated JSON)
+    max_api_retries = 3
+    characters_data = None
 
-    characters_data = json.loads(char_json)
+    for api_attempt in range(max_api_retries):
+        try:
+            char_response = client.generate_text(
+                messages=[
+                    {"role": "system", "content": char_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.9,
+                max_tokens=2000,
+                json_mode=True
+            )
 
-    # Add voice_id to characters
+            char_json = char_response.strip()
+            if char_json.startswith("```"):
+                lines = char_json.split("\n")
+                char_json = "\n".join([l for l in lines if not l.startswith("```")])
+
+            # Use retry-enabled JSON parser
+            characters_data = _parse_json_with_retry(char_json, "PRO_CHARACTERS")
+            logger.info(f"[PRO MODE] Characters parsed successfully on API attempt {api_attempt + 1}")
+            break
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[PRO MODE] Character generation attempt {api_attempt + 1}/{max_api_retries} failed: {e}")
+            if api_attempt < max_api_retries - 1:
+                time.sleep(1)  # Wait before retry
+            else:
+                raise ValueError(f"Failed to generate valid characters JSON after {max_api_retries} attempts: {e}")
+
+    # Add voice_id to characters based on TTS provider
+    default_female = "Calm_Woman" if settings.TTS_PROVIDER == "minimax" else "xi3rF0t7dg7uN2M0WUhr"
+    default_narrator = "Deep_Voice_Man" if settings.TTS_PROVIDER == "minimax" else "uyVNoMrnUku1dZyVEXwD"
+
     for i, char in enumerate(characters_data.get("characters", [])):
         if female_voices:
             char["voice_id"] = female_voices[i % len(female_voices)]["voice_id"]
         else:
-            char["voice_id"] = "xi3rF0t7dg7uN2M0WUhr"  # Default
+            char["voice_id"] = default_female
 
     # Add narrator
     characters_data["characters"].append({
         "char_id": "narrator",
         "name": "내레이터",
         "description": None,
-        "voice_id": male_voices[0]["voice_id"] if male_voices else "uyVNoMrnUku1dZyVEXwD",
+        "voice_id": male_voices[0]["voice_id"] if male_voices else default_narrator,
         "seed": 9999
     })
 
@@ -916,8 +1050,11 @@ JSON 형식:
 2. 동작이 자연스럽게 연결되어야 함 (예: 앉아있다 → 일어선다)
 3. 텍스트는 반드시 20자 이내
 4. 캐릭터 변수 반드시 사용
+5. **[핵심!] 씬 N의 end_frame_prompt는 씬 N+1의 start_frame_prompt와 완전히 동일해야 함!**
+   - 예: scene_1의 end_frame = scene_2의 start_frame
+   - 이렇게 해야 영상이 끊김 없이 자연스럽게 연결됨
 
-JSON 형식:
+JSON 형식 (씬 연결 예시):
 {{
   "mode": "pro",
   "title": "영상 제목",
@@ -928,40 +1065,60 @@ JSON 형식:
   "scenes": [
     {{
       "scene_id": "scene_1",
-      "start_frame_prompt": "{{char_1}} + 창가에 앉아 책을 읽고 있다 + 햇살 가득한 방",
-      "end_frame_prompt": "{{char_1}} + 고개를 들어 창밖을 바라본다 + 햇살 가득한 방",
+      "start_frame_prompt": "{{char_1}} 창가에 앉아 책을 읽고 있다, 햇살 가득한 방",
+      "end_frame_prompt": "{{char_1}} 고개를 들어 창밖을 바라본다, 햇살 가득한 방",
       "text": "오늘도 평화로운 하루",
       "speaker": "narrator",
-      "duration_ms": 5000,
-      "tts_duration_ms": null,
-      "video_url": null,
-      "start_image_url": null,
-      "end_image_url": null,
-      "audio_url": null
+      "duration_ms": 5000
+    }},
+    {{
+      "scene_id": "scene_2",
+      "start_frame_prompt": "{{char_1}} 고개를 들어 창밖을 바라본다, 햇살 가득한 방",
+      "end_frame_prompt": "{{char_1}} 미소 지으며 일어선다, 햇살 가득한 방",
+      "text": "무언가 좋은 일이 있을 것 같아",
+      "speaker": "char_1",
+      "duration_ms": 5000
     }}
   ]
-}}"""
+}}
+
+**씬 연결 규칙**: scene_1.end_frame_prompt == scene_2.start_frame_prompt (동일해야 함!)"""
 
     logger.info("[PRO MODE] Step 2: Generating plot...")
-    plot_response = client.generate_text(
-        messages=[
-            {"role": "system", "content": plot_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=1.0,
-        max_tokens=8000,
-        json_mode=True
-    )
 
-    plot_json = plot_response.strip()
-    if plot_json.startswith("```json"):
-        plot_json = plot_json[7:]
-    if plot_json.startswith("```"):
-        plot_json = plot_json[3:]
-    if plot_json.endswith("```"):
-        plot_json = plot_json[:-3]
+    # Retry logic for plot generation
+    plot_data = None
+    for api_attempt in range(max_api_retries):
+        try:
+            plot_response = client.generate_text(
+                messages=[
+                    {"role": "system", "content": plot_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=1.0,
+                max_tokens=8000,
+                json_mode=True
+            )
 
-    plot_data = json.loads(plot_json.strip())
+            plot_json = plot_response.strip()
+            if plot_json.startswith("```json"):
+                plot_json = plot_json[7:]
+            if plot_json.startswith("```"):
+                plot_json = plot_json[3:]
+            if plot_json.endswith("```"):
+                plot_json = plot_json[:-3]
+
+            # Use retry-enabled JSON parser
+            plot_data = _parse_json_with_retry(plot_json.strip(), "PRO_PLOT")
+            logger.info(f"[PRO MODE] Plot parsed successfully on API attempt {api_attempt + 1}")
+            break
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[PRO MODE] Plot generation attempt {api_attempt + 1}/{max_api_retries} failed: {e}")
+            if api_attempt < max_api_retries - 1:
+                time.sleep(1)
+            else:
+                raise ValueError(f"Failed to generate valid plot JSON after {max_api_retries} attempts: {e}")
 
     # Add characters from characters_data for template substitution
     plot_data["characters"] = [
@@ -997,14 +1154,25 @@ def _generate_fallback(
     """
     Fallback: rule-based generation when GPT fails.
     """
+    from app.config import settings
+
     logger.info(f"[DEBUG] Fallback generation: mode='{mode}', num_cuts={num_cuts}")
     characters_path = output_dir / "characters.json"
     plot_path = output_dir / "plot.json"
 
-    # Generate simple characters with default voices
-    default_female_voice = "xi3rF0t7dg7uN2M0WUhr"  # Yuna
-    default_male_voice = "3MTvEr8xCMCC2mL9ujrI"  # June
-    narration_voice = "uyVNoMrnUku1dZyVEXwD"  # Anna Kim
+    # Generate simple characters with default voices based on TTS provider
+    if settings.TTS_PROVIDER == "minimax":
+        # MiniMax voice IDs
+        default_female_voice = "Calm_Woman"  # Yuna
+        default_male_voice = "Deep_Voice_Man"  # June
+        narration_voice = "Inspirational_girl"  # Anna Kim
+        logger.info("[FALLBACK] Using MiniMax default voices")
+    else:
+        # ElevenLabs voice IDs
+        default_female_voice = "xi3rF0t7dg7uN2M0WUhr"  # Yuna
+        default_male_voice = "3MTvEr8xCMCC2mL9ujrI"  # June
+        narration_voice = "uyVNoMrnUku1dZyVEXwD"  # Anna Kim
+        logger.info(f"[FALLBACK] Using {settings.TTS_PROVIDER} default voices")
 
     if characters:
         # Use provided characters
@@ -1093,11 +1261,13 @@ def _generate_fallback(
     if mode == "story":
         plot_data = {
             "title": prompt[:10] if len(prompt) <= 10 else prompt[:10] + "...",
+            "mode": mode,
             "scenes": scenes
         }
     else:
         plot_data = {
             "title": prompt[:10] if len(prompt) <= 10 else prompt[:10] + "...",
+            "mode": mode,
             "bgm_prompt": "calm, atmospheric background music",
             "scenes": scenes
         }

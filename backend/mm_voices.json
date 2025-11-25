@@ -1,0 +1,61 @@
+{
+  "provider": "MiniMax",
+  "model": "speech-02-turbo",
+  "voices": {
+    "female": [
+      {
+        "voice_id": "Calm_Woman",
+        "name": "Yuna",
+        "description": "밝고 친밀한 내레이션형. 부드러운 호흡과 따뜻한 정서.",
+        "recommended_roles": ["주인공", "내레이션", "공감형"],
+        "tags": ["pitch:mid","energy:low-mid","speed:normal","diction:soft","reso:oral+breath","emo:warm"]
+      },
+      {
+        "voice_id": "Inspirational_girl",
+        "name": "Anna Kim",
+        "description": "발표·튜토리얼 특화. 빠른 템포, 또렷한 딕션, 전문적 톤.",
+        "recommended_roles": ["정보 전달", "전문성", "튜토리얼"],
+        "tags": ["pitch:mid-high","energy:mid","speed:fast","diction:crisp","reso:oral","emo:neutral"]
+      },
+      {
+        "voice_id": "Wise_Woman",
+        "name": "Rosa Oh",
+        "description": "드라이하고 세련된 쿨 톤. 고음 중심, 감정 절제.",
+        "recommended_roles": ["이성적 인물", "조언자", "광고"],
+        "tags": ["pitch:high","energy:low","speed:normal","diction:clear","reso:head+nasal","emo:cool"]
+      }
+    ],
+    "male": [
+      {
+        "voice_id": "Deep_Voice_Man",
+        "name": "June",
+        "description": "보도·공식 내레이션. 느린 템포, 묵직한 중저음, 높은 가독성.",
+        "recommended_roles": ["뉴스", "공식 내레이션", "정책/안내"],
+        "tags": ["pitch:low-mid","energy:low","speed:slow","diction:very-clear","reso:chest","emo:neutral"]
+      },
+      {
+        "voice_id": "Patient_Man",
+        "name": "Nobel Butler",
+        "description": "따뜻하고 포근한 상담자 톤. 저음 공명, 친근한 호흡.",
+        "recommended_roles": ["자상한 친구", "멘토", "상담"],
+        "tags": ["pitch:low","energy:low","speed:normal","diction:soft","reso:wide-chest","emo:warm"]
+      },
+      {
+        "voice_id": "Casual_Guy",
+        "name": "Taemin",
+        "description": "활기찬 주인공 톤. 빠른 말속도, 밝은 에너지.",
+        "recommended_roles": ["친구", "청년", "주인공"],
+        "tags": ["pitch:mid","energy:high","speed:fast","diction:clear","reso:oral","emo:bright"]
+      }
+    ]
+  },
+  "defaults": {
+    "voice_setting": {
+      "speed": 1.0,
+      "vol": 1.0,
+      "pitch": 0,
+      "emotion": "neutral",
+      "text_normalization": false
+    }
+  }
+}

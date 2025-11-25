@@ -49,6 +49,13 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
             from app.providers.tts.stub_client import StubTTSClient
             client = StubTTSClient()
             logger.info(f"[{run_id}] Using Stub TTS client (test mode)")
+        elif settings.TTS_PROVIDER == "minimax" and settings.MINIMAX_API_KEY:
+            from app.providers.tts.minimax_client import MiniMaxTTSClient
+            client = MiniMaxTTSClient(
+                api_key=settings.MINIMAX_API_KEY,
+                group_id=settings.MINIMAX_GROUP_ID
+            )
+            logger.info(f"[{run_id}] Using MiniMax TTS client")
         elif settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
             from app.providers.tts.elevenlabs_client import ElevenLabsClient
             client = ElevenLabsClient(api_key=settings.ELEVENLABS_API_KEY)
@@ -63,13 +70,17 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
 
         voice_results = []
 
-        # Load voices.json for smart voice matching
+        # Load voices config based on TTS provider
         voices_config = None
-        voices_path = Path("voices.json")
+        if settings.TTS_PROVIDER == "minimax":
+            voices_path = Path("mm_voices.json")
+        else:
+            voices_path = Path("voices.json")
+
         if voices_path.exists():
             with open(voices_path, "r", encoding="utf-8") as f:
                 voices_config = json.load(f)
-            logger.info(f"[{run_id}] Loaded voices.json for voice matching")
+            logger.info(f"[{run_id}] Loaded {voices_path} for voice matching")
 
         # Load characters.json for gender/personality info
         characters_json_path = Path(json_path).parent / "characters.json"
@@ -269,6 +280,14 @@ def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
         if stub_mode:
             from app.providers.tts.stub_client import StubTTSClient
             client = StubTTSClient()
+            logger.info(f"[{run_id}] Using Stub TTS client (test mode)")
+        elif settings.TTS_PROVIDER == "minimax" and settings.MINIMAX_API_KEY:
+            from app.providers.tts.minimax_client import MiniMaxTTSClient
+            client = MiniMaxTTSClient(
+                api_key=settings.MINIMAX_API_KEY,
+                group_id=settings.MINIMAX_GROUP_ID
+            )
+            logger.info(f"[{run_id}] Using MiniMax TTS client")
         elif settings.TTS_PROVIDER == "elevenlabs" and settings.ELEVENLABS_API_KEY:
             from app.providers.tts.elevenlabs_client import ElevenLabsClient
             client = ElevenLabsClient(api_key=settings.ELEVENLABS_API_KEY)
