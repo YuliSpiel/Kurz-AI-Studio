@@ -253,7 +253,11 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
 def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
     """
     Generate TTS voice for Pro mode scenes.
-    Pro mode has a simpler structure: each scene has a single 'text' field.
+    Pro mode supports per-character voices via the 'speaker' field.
+
+    Speaker types:
+    - "narrator": Default narration voice
+    - "char_1", "char_2", etc.: Character-specific voices from characters.json
 
     Args:
         run_id: Run identifier
@@ -300,21 +304,37 @@ def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
             client = StubTTSClient()
 
         voice_results = []
-        audio_dir = Path(f"app/data/outputs/{run_id}/audio")
+        output_dir = Path(json_path).parent
+        audio_dir = output_dir / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
+        # Build character voice mapping
+        # Priority: characters.json > plot.json characters > default
+        char_voices = {}
+
         # Load characters.json for voice_id lookup
-        characters_json_path = Path(json_path).parent / "characters.json"
-        narration_voice = "default"
+        characters_json_path = output_dir / "characters.json"
         if characters_json_path.exists():
             with open(characters_json_path, "r", encoding="utf-8") as f:
                 characters_data = json.load(f)
-            # Find narration voice
             for char in characters_data.get("characters", []):
-                if char["char_id"] == "narration" and "voice_id" in char:
-                    narration_voice = char["voice_id"]
-                    break
-            logger.info(f"[{run_id}] Using narration voice: {narration_voice}")
+                if "voice_id" in char:
+                    char_voices[char["char_id"]] = char["voice_id"]
+                    logger.info(f"[{run_id}] Voice mapping from characters.json: {char['char_id']} -> {char['voice_id']}")
+
+        # Also check plot.json characters (Pro mode stores characters in plot.json)
+        for char in plot.get("characters", []):
+            char_id = char.get("char_id")
+            if char_id and char_id not in char_voices:
+                # Use default voice based on character name hint
+                char_voices[char_id] = "default"
+                logger.info(f"[{run_id}] Using default voice for {char_id}")
+
+        # Set default narrator voice
+        if "narrator" not in char_voices:
+            char_voices["narrator"] = char_voices.get("narration", "default")
+
+        logger.info(f"[{run_id}] Character voice mappings: {char_voices}")
 
         # Generate TTS for each scene
         scenes = plot.get("scenes", [])
@@ -330,13 +350,19 @@ def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
             # Remove quotes for TTS
             tts_text = text.strip('"')
 
-            logger.info(f"[{run_id}] Pro TTS for {scene_id}: {tts_text[:30]}...")
+            # Get voice_id for speaker
+            voice_id = char_voices.get(speaker, char_voices.get("narrator", "default"))
 
+            logger.info(f"[{run_id}] Pro TTS for {scene_id}: speaker={speaker}, voice={voice_id}")
+            logger.info(f"[{run_id}]   Text: {tts_text[:40]}...")
+
+            # Generate speech
+            audio_filename = f"{scene_id}_voice.mp3"
             audio_path = client.generate_speech(
                 text=tts_text,
-                voice_id=narration_voice,
+                voice_id=voice_id,
                 emotion="neutral",
-                output_filename=str(audio_dir / f"{scene_id}_narrator.mp3")
+                output_filename=str(audio_dir / audio_filename)
             )
 
             # Measure audio duration
@@ -354,15 +380,20 @@ def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
             scene["audio_url"] = str(audio_path)
             scene["tts_duration_ms"] = audio_duration_ms
 
+            # Calculate duration: max(5000ms, tts_duration)
+            # Pro mode video is 5 seconds, if TTS is longer we freeze frame
+            scene["duration_ms"] = max(5000, audio_duration_ms)
+
             voice_results.append({
                 "scene_id": scene_id,
-                "line_id": f"{scene_id}_narrator",
+                "line_id": f"{scene_id}_voice",
+                "speaker": speaker,
                 "audio_url": str(audio_path),
                 "duration_ms": audio_duration_ms
             })
 
             progress = 0.55 + (0.1 * (idx + 1) / len(scenes))
-            publish_progress(run_id, progress=progress, log=f"성우: {scene_id} 음성 생성 완료")
+            publish_progress(run_id, progress=progress, log=f"성우: {scene_id} 음성 생성 완료 ({audio_duration_ms}ms)")
 
         # Save updated plot.json with audio URLs and durations
         with open(json_path, "w", encoding="utf-8") as f:
