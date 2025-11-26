@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { enhancePrompt, createRun, PromptEnhancementResult, getPlotJson, confirmPlot, regeneratePlot, PlotJsonData, Character } from '../api/client'
+import { loadVideoSettings } from './VideoSettingsModal'
 
 interface HeroChatProps {
   onEnhancementReady?: (enhancement: PromptEnhancementResult, originalPrompt: string) => void
@@ -40,8 +41,8 @@ const ROTATING_WORDS = ['Epic', 'Cool', 'Fire', 'Viral', 'Neat', 'Bold']
 const COLORS = ['#6f9fa0', '#7189a0', '#c9a989'] // 짙게 한 버전
 
 const PLACEHOLDERS: Record<'general' | 'pro', string[]> = {
-  general: ['2030 직장인 공감 썰', '세계 5대 명소 추천'],
-  pro: ['소꿉친구랑 결혼 골인한 이야기', '아기 고양이의 우주 모험'],
+  general: ['2030 직장인 공감 썰', '세계 5대 진미 소개', '인생 역전한 사람들의 공통점', '서울에서 꼭 먹어야 할 음식', '하루 10분 투자로 영어 잘하는 법'],
+  pro: ['이상형이랑 결혼 골인한 이야기', '카피바라의 모험', '가장 똑똑한 강아지 순위'],
 }
 
 function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disabled = false }: HeroChatProps) {
@@ -101,15 +102,9 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
     return () => clearInterval(interval)
   }, [])
 
-  // Typing effect for placeholder
+  // Typing effect for placeholder (both general and pro modes)
   useEffect(() => {
     if (!currentPlaceholderText) return
-
-    // Pro mode: no typing effect, show immediately
-    if (selectedMode === 'pro') {
-      setTypedPlaceholder(currentPlaceholderText)
-      return
-    }
 
     let currentCharIndex = 0
     setTypedPlaceholder('')
@@ -227,6 +222,9 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
     if (!enhancementResult) return
 
     try {
+      // Load saved video settings (layout config)
+      const videoSettings = loadVideoSettings()
+
       // Create run spec from enhancement result
       const runSpec = {
         mode: selectedMode,
@@ -239,6 +237,15 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
         plot_structure: editedPlotStructure,
         video_title: editedTitle,
         review_mode: false, // Auto-generate mode - no review
+        // Layout config from video settings
+        layout_config: {
+          use_title_block: videoSettings.use_title_block,
+          title_bg_color: videoSettings.title_bg_color,
+          title_font: videoSettings.title_font,
+          title_font_size: videoSettings.title_font_size,
+          subtitle_font: videoSettings.subtitle_font,
+          subtitle_font_size: videoSettings.subtitle_font_size,
+        },
         // Test mode flags
         stub_image_mode: stubImageMode,
         stub_music_mode: stubMusicMode,
@@ -265,6 +272,9 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
     if (!enhancementResult) return
 
     try {
+      // Load saved video settings (layout config)
+      const videoSettings = loadVideoSettings()
+
       // Create run spec from enhancement result with review mode enabled
       const runSpec = {
         mode: selectedMode,
@@ -277,6 +287,15 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
         plot_structure: editedPlotStructure,
         video_title: editedTitle,
         review_mode: true, // Review mode - will show plot review modal
+        // Layout config from video settings
+        layout_config: {
+          use_title_block: videoSettings.use_title_block,
+          title_bg_color: videoSettings.title_bg_color,
+          title_font: videoSettings.title_font,
+          title_font_size: videoSettings.title_font_size,
+          subtitle_font: videoSettings.subtitle_font,
+          subtitle_font_size: videoSettings.subtitle_font_size,
+        },
         // Test mode flags
         stub_image_mode: stubImageMode,
         stub_music_mode: stubMusicMode,
@@ -1234,10 +1253,10 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
                           onChange={(e) => setEditedNarrativeTone(e.target.value)}
                         >
                           <option value="격식형">-입니다</option>
+                          <option value="친근존댓말">-해요/-예요</option>
                           <option value="서술형">-함/-임</option>
-                          <option value="친근한반말">-야/ -지?</option>
+                          <option value="친근한반말">-야/-지?</option>
                           <option value="진지한나레이션">진지한 나레이션</option>
-                          <option value="감정강조">감정 풍부</option>
                           <option value="코믹풍자">병맛/밈</option>
                         </select>
                       </div>
@@ -1255,7 +1274,7 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
                           <option value="비교형">Before-After</option>
                           <option value="반전형">반전형</option>
                           <option value="정보나열">정보 나열형</option>
-                          <option value="감정곡선">감정 곡선 : 공감→위로→희망</option>
+                          <option value="공감스토리">공감→위로→희망</option>
                           <option value="질문형">질문형 오프닝</option>
                         </select>
                       </div>

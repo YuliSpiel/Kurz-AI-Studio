@@ -5,9 +5,15 @@ Creates silent MP3 files as placeholders.
 import logging
 from pathlib import Path
 
+from pydub import AudioSegment
+from pydub.generators import Sine
+
 from app.providers.tts.base import TTSProvider
 
 logger = logging.getLogger(__name__)
+
+# Default stub audio duration in milliseconds (2 seconds)
+STUB_DURATION_MS = 2000
 
 
 class StubTTSClient(TTSProvider):
@@ -50,15 +56,12 @@ class StubTTSClient(TTSProvider):
         output_path = Path(output_filename)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create minimal silent MP3 file (valid MP3 header)
-        # This is a 0.1 second silent MP3 at 44.1kHz
-        silent_mp3_data = bytes.fromhex(
-            "fff3600000000000000000000000000000000000"
-            "49443303000000000000545353450000000300"
-        )
+        # Create 2-second silent MP3 file using pydub
+        # Generate silent audio segment (2 seconds at 44.1kHz stereo)
+        silent_audio = AudioSegment.silent(duration=STUB_DURATION_MS, frame_rate=44100)
 
-        with open(output_path, "wb") as f:
-            f.write(silent_mp3_data)
+        # Export as MP3
+        silent_audio.export(str(output_path), format="mp3", bitrate="128k")
 
-        logger.info(f"Stub TTS: created placeholder at {output_path}")
+        logger.info(f"Stub TTS: created {STUB_DURATION_MS}ms placeholder at {output_path}")
         return output_path
