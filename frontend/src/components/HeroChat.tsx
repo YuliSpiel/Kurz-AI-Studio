@@ -307,6 +307,8 @@ function HeroChat({ onEnhancementReady: _onEnhancementReady, onRunCreated, disab
     while (retries < maxRetries) {
       try {
         const data = await getPlotJson(runId)
+        console.log(`[${runId}] Raw API response:`, JSON.stringify(data, null, 2))
+        console.log(`[${runId}] data.plot.characters:`, data.plot.characters)
         setPlotData(data)
         setScenes(data.plot.scenes)
         setCharacters(data.plot.characters || [])

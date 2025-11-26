@@ -1252,10 +1252,12 @@ async def regenerate_scene_image(run_id: str, scene_id: str, request: Request):
     if not fsm:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    if fsm.current_state != RunState.ASSET_REVIEW:
+    # Allow regeneration in both ASSET_REVIEW and LAYOUT_REVIEW states
+    allowed_states = [RunState.ASSET_REVIEW, RunState.LAYOUT_REVIEW]
+    if fsm.current_state not in allowed_states:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot regenerate image: current state is {fsm.current_state.value}, expected ASSET_REVIEW"
+            detail=f"Cannot regenerate image: current state is {fsm.current_state.value}, expected ASSET_REVIEW or LAYOUT_REVIEW"
         )
 
     # Get request body
@@ -1300,7 +1302,12 @@ async def regenerate_scene_image(run_id: str, scene_id: str, request: Request):
         characters = []
         if characters_json_path.exists():
             with open(characters_json_path, "r") as f:
-                characters = orjson.loads(f.read())
+                char_data = orjson.loads(f.read())
+                # Handle both formats: {"characters": [...]} and [...]
+                if isinstance(char_data, dict) and "characters" in char_data:
+                    characters = char_data["characters"]
+                elif isinstance(char_data, list):
+                    characters = char_data
 
         # Substitute character variables {char_1}, {char_2}, etc.
         for i, char in enumerate(characters, start=1):
@@ -1401,10 +1408,12 @@ async def regenerate_bgm(run_id: str, request: Request):
     if not fsm:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    if fsm.current_state != RunState.ASSET_REVIEW:
+    # Allow regeneration in both ASSET_REVIEW and LAYOUT_REVIEW states
+    allowed_states = [RunState.ASSET_REVIEW, RunState.LAYOUT_REVIEW]
+    if fsm.current_state not in allowed_states:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot regenerate BGM: current state is {fsm.current_state.value}, expected ASSET_REVIEW"
+            detail=f"Cannot regenerate BGM: current state is {fsm.current_state.value}, expected ASSET_REVIEW or LAYOUT_REVIEW"
         )
 
     # Get request body
