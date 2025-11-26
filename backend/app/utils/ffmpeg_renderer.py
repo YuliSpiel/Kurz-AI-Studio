@@ -147,12 +147,13 @@ class FFmpegRenderer:
 
         # Calculate title block height
         line_height = int(self.title_font_size * 1.3)  # 1.3x for line spacing
-        padding_top = 40  # Increased from 20 for better spacing
-        padding_bottom = 40  # Increased from 20 for better spacing
+        notch_safe_area = 120  # Safe area for smartphone notch/dynamic island (increased for better visibility)
+        padding_top = 40  # Padding between notch safe area and title text
+        padding_bottom = 40  # Padding after title text
         padding_left = 30
 
         title_text_height = len(title_lines) * line_height
-        title_block_height = title_text_height + padding_top + padding_bottom
+        title_block_height = notch_safe_area + padding_top + title_text_height + padding_bottom
 
         # Draw title background
         draw.rectangle(
@@ -160,8 +161,8 @@ class FFmpegRenderer:
             fill=self.title_bg_color
         )
 
-        # Draw title text (center-aligned, multi-line)
-        current_y = padding_top
+        # Draw title text (center-aligned, multi-line) - below notch safe area
+        current_y = notch_safe_area + padding_top
         for line in title_lines:
             # Calculate centered x position for each line
             bbox = title_font.getbbox(line)

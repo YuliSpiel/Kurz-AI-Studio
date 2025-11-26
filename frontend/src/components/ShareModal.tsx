@@ -11,10 +11,13 @@ interface ShareModalProps {
   defaultTitle?: string
 }
 
+const DEFAULT_DESCRIPTION = `텍스트 한줄을 바로 숏폼으로!
+Kurz AI Studio에서 생성한 숏폼입니다.`
+
 export default function ShareModal({ isOpen, onClose, videoUrl: _videoUrl, runId, defaultTitle = '' }: ShareModalProps) {
   const { user } = useAuth()
   const [title, setTitle] = useState(defaultTitle)
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(DEFAULT_DESCRIPTION)
   const [scheduledTime, setScheduledTime] = useState('')
   const [isScheduled, setIsScheduled] = useState(false)
   const [youtubeConnected, setYoutubeConnected] = useState(false)
@@ -26,6 +29,13 @@ export default function ShareModal({ isOpen, onClose, videoUrl: _videoUrl, runId
 
   // Suppress unused variable warning
   void _videoUrl
+
+  // Update title when defaultTitle changes
+  useEffect(() => {
+    if (defaultTitle) {
+      setTitle(defaultTitle)
+    }
+  }, [defaultTitle])
 
   // Check YouTube connection status on mount
   useEffect(() => {

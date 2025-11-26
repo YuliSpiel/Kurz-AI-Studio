@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getMyRuns, deleteRun, RunListItem } from '../api/client'
+import { getMyRuns, deleteRun, RunListItem, getLayoutConfig } from '../api/client'
 import ShareModal from './ShareModal'
 import './Library.css'
 
@@ -17,6 +17,7 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
   // Share modal state
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareTarget, setShareTarget] = useState<RunListItem | null>(null)
+  const [shareTitle, setShareTitle] = useState('')
 
   useEffect(() => {
     loadRuns()
@@ -62,13 +63,20 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
     alert('즐겨찾기 기능은 곧 추가됩니다')
   }
 
-  const handleShare = (run: RunListItem, event: React.MouseEvent) => {
+  const handleShare = async (run: RunListItem, event: React.MouseEvent) => {
     event.stopPropagation()
     if (run.state !== 'COMPLETED' || !run.video_url) {
       alert('완료된 영상만 공유할 수 있습니다')
       return
     }
     setShareTarget(run)
+    // 제목 가져오기
+    try {
+      const layoutData = await getLayoutConfig(run.run_id)
+      setShareTitle(layoutData.title || '')
+    } catch {
+      setShareTitle('')
+    }
     setShareModalOpen(true)
   }
 
@@ -325,10 +333,11 @@ export default function Library({ onSelectVideo }: { onSelectVideo?: (runId: str
           onClose={() => {
             setShareModalOpen(false)
             setShareTarget(null)
+            setShareTitle('')
           }}
           videoUrl={shareTarget.video_url || ''}
           runId={shareTarget.run_id}
-          defaultTitle={shareTarget.prompt?.slice(0, 50) || ''}
+          defaultTitle={shareTitle}
         />
       )}
     </div>

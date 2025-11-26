@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getRun, cancelRun } from '../api/client'
+import { getRun, cancelRun, getLayoutConfig } from '../api/client'
 import PlotReviewModal from './PlotReviewModal'
 import LayoutReviewModal from './LayoutReviewModal'
 import AssetReviewModal from './AssetReviewModal'
+import ShareModal from './ShareModal'
 
 interface RunStatusProps {
   runId: string
@@ -20,6 +21,8 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
   const [assetAnimFrame, setAssetAnimFrame] = useState(1)
   const [isCancelling, setIsCancelling] = useState(false)
   const [_isMinimized, setIsMinimized] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [videoTitle, setVideoTitle] = useState('')
 
   const handleCancel = async () => {
     const confirmed = window.confirm('정말로 영상 제작을 취소하시겠습니까?')
@@ -117,6 +120,12 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
         // (onCompleted를 호출하면 App.tsx가 Player 컴포넌트로 전환되어 팝업이 아닌 페이지에 영상이 표시됨)
         if (data.state === 'END' || data.state === 'FAILED') {
           clearInterval(interval)
+          // END 상태일 때 title 가져오기 (YouTube 업로드용)
+          if (data.state === 'END') {
+            getLayoutConfig(runId).then((layoutData) => {
+              setVideoTitle(layoutData.title || '')
+            }).catch(console.error)
+          }
         }
       })
     }, 2000)
@@ -466,30 +475,54 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
                   </div>
                 )}
 
-                {/* Download Button */}
-                <a
-                  href={status.artifacts?.video_url || `/outputs/${runId}/final_video.mp4`}
-                  download={`${runId}.mp4`}
-                  style={{ textDecoration: 'none' }}
-                >
-                  <button style={{
-                    padding: '12px 24px',
-                    backgroundColor: '#6f9fa0',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    transition: 'background-color 0.2s',
-                    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#5a8081'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#6f9fa0'}
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {/* Download Button */}
+                  <a
+                    href={status.artifacts?.video_url || `/outputs/${runId}/final_video.mp4`}
+                    download={`${runId}.mp4`}
+                    style={{ textDecoration: 'none' }}
                   >
-                    📥 영상 다운로드
+                    <button style={{
+                      padding: '12px 24px',
+                      backgroundColor: '#6f9fa0',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s',
+                      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#5a8081'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#6f9fa0'}
+                    >
+                      📥 영상 다운로드
+                    </button>
+                  </a>
+
+                  {/* YouTube Upload Button */}
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: '#FF0000',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s',
+                      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#cc0000'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#FF0000'}
+                  >
+                    ▶️ YouTube 업로드
                   </button>
-                </a>
+                </div>
 
                 {/* Optional: Add "Create New Video" button */}
                 <button
@@ -1486,6 +1519,17 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
             // Refresh status after confirmation
             getRun(runId).then(setStatus)
           }}
+        />
+      )}
+
+      {/* Share Modal (YouTube Upload) */}
+      {showShareModal && (
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          videoUrl={status.artifacts?.video_url || `/outputs/${runId}/final_video.mp4`}
+          runId={runId}
+          defaultTitle={videoTitle}
         />
       )}
 
