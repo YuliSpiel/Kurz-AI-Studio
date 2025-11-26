@@ -78,7 +78,13 @@ def qa_task(self, run_id: str, json_path: str, video_path: str):
         publish_progress(run_id, progress=0.87, log="QA: 영상 파일 확인 완료")
 
         # Check 2: JSON 레이아웃 유효성
-        required_keys = ["scenes", "timeline"]
+        # Pro mode uses plot.json (no timeline), other modes use layout.json (has timeline)
+        mode = layout.get("mode", "general")
+        if mode == "pro":
+            required_keys = ["scenes"]  # Pro mode: plot.json doesn't have timeline
+        else:
+            required_keys = ["scenes", "timeline"]  # General/Story/Ad: layout.json has timeline
+
         for key in required_keys:
             if key not in layout:
                 qa_results["checks"].append({
@@ -102,24 +108,44 @@ def qa_task(self, run_id: str, json_path: str, video_path: str):
         scenes = layout.get("scenes", [])
         for scene in scenes:
             scene_id = scene.get("scene_id", "unknown")
-            images = scene.get("images", [])  # Changed from image_slots to images
 
-            for slot in images:
-                image_url = slot.get("image_url")
-                if not image_url or not Path(image_url).exists():
-                    qa_results["checks"].append({
-                        "name": f"Image for scene {scene_id}",
-                        "passed": False,
-                        "message": f"Image missing or invalid: {image_url}"
-                    })
-                    qa_results["passed"] = False
-                    qa_results["issues"].append(f"이미지 누락: {scene_id}")
-                else:
-                    qa_results["checks"].append({
-                        "name": f"Image for scene {scene_id}",
-                        "passed": True,
-                        "message": f"Image found: {image_url}"
-                    })
+            if mode == "pro":
+                # Pro mode: check start_image_url and end_image_url
+                for img_key in ["start_image_url", "end_image_url"]:
+                    image_url = scene.get(img_key)
+                    if not image_url or not Path(image_url).exists():
+                        qa_results["checks"].append({
+                            "name": f"{img_key} for scene {scene_id}",
+                            "passed": False,
+                            "message": f"Image missing or invalid: {image_url}"
+                        })
+                        qa_results["passed"] = False
+                        qa_results["issues"].append(f"이미지 누락: {scene_id}/{img_key}")
+                    else:
+                        qa_results["checks"].append({
+                            "name": f"{img_key} for scene {scene_id}",
+                            "passed": True,
+                            "message": f"Image found: {image_url}"
+                        })
+            else:
+                # General/Story/Ad mode: check images array
+                images = scene.get("images", [])
+                for slot in images:
+                    image_url = slot.get("image_url")
+                    if not image_url or not Path(image_url).exists():
+                        qa_results["checks"].append({
+                            "name": f"Image for scene {scene_id}",
+                            "passed": False,
+                            "message": f"Image missing or invalid: {image_url}"
+                        })
+                        qa_results["passed"] = False
+                        qa_results["issues"].append(f"이미지 누락: {scene_id}")
+                    else:
+                        qa_results["checks"].append({
+                            "name": f"Image for scene {scene_id}",
+                            "passed": True,
+                            "message": f"Image found: {image_url}"
+                        })
 
         logger.info(f"[{run_id}] QA: ✓ All scene images present")
         publish_progress(run_id, progress=0.93, log="QA: 씬 이미지 확인 완료")

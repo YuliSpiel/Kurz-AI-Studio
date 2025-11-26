@@ -455,21 +455,29 @@ def director_task_pro(self, asset_results: list, run_id: str, json_path: str):
 
         logger.info(f"[{run_id}] Plot loaded with {len(plot.get('scenes', []))} scenes")
 
-        # Load layout.json for title and layout_config
+        # Load title and layout_config
+        # Pro mode: title from plot.json, General mode: title from layout.json
         layout_json_path = Path(json_path).parent / "layout.json"
         title_text = ""
         layout_config = {}
+
+        # First, try to get title from plot.json (Pro mode has it here)
+        title_text = plot.get("title", "")
+
+        # Then, try layout.json for additional config (General mode)
         if layout_json_path.exists():
             try:
                 with open(layout_json_path, "r", encoding="utf-8") as f:
                     layout = json.load(f)
-                title_text = layout.get("title", "")
+                # Use layout.json title if plot.json didn't have one
+                if not title_text:
+                    title_text = layout.get("title", "")
                 layout_config = layout.get("metadata", {}).get("layout_config", {})
-                logger.info(f"[{run_id}] Layout config loaded: title='{title_text[:30]}...', config={layout_config}")
+                logger.info(f"[{run_id}] Layout config loaded: title='{title_text[:30] if title_text else '(empty)'}', config={layout_config}")
             except Exception as e:
                 logger.warning(f"[{run_id}] Failed to load layout.json: {e}")
         else:
-            logger.warning(f"[{run_id}] layout.json not found at {layout_json_path}")
+            logger.info(f"[{run_id}] Pro mode: using title from plot.json: '{title_text[:30] if title_text else '(empty)'}'")
 
         # Update plot with asset URLs from chord results (if any)
         if asset_results:
@@ -531,6 +539,7 @@ def director_task_pro(self, asset_results: list, run_id: str, json_path: str):
 
         # Generate video for each scene using Kling
         scenes = plot.get("scenes", [])
+
         scene_videos = []
 
         for idx, scene in enumerate(scenes):
@@ -862,6 +871,15 @@ def _compose_pro_video(
         # Overlay cropped video on frame at video_area_top position
         filter_parts.append(f"[1:v][vcropped]overlay=0:{video_area_top}[vout]")
 
+        # Calculate scene duration (video length or TTS length, whichever is longer)
+        scene_duration = max(tts_duration_sec, video_duration_sec)
+
+        # Add audio padding to match scene duration
+        # This ensures TTS plays at scene start and silence fills remaining time
+        if audio_input_idx is not None:
+            # apad pads with silence, then atrim cuts to exact duration
+            filter_parts.append(f"[{audio_input_idx}:a]apad=whole_dur={scene_duration}[aout]")
+
         filter_complex = ";".join(filter_parts)
 
         cmd = [
@@ -871,9 +889,9 @@ def _compose_pro_video(
             "-map", "[vout]",
         ]
 
-        # Add audio mapping
+        # Add audio mapping (now using filtered audio with padding)
         if audio_input_idx is not None:
-            cmd.extend(["-map", f"{audio_input_idx}:a"])
+            cmd.extend(["-map", "[aout]"])
         else:
             cmd.extend(["-an"])
 
@@ -883,7 +901,7 @@ def _compose_pro_video(
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "128k",
-            "-t", str(max(tts_duration_sec, video_duration_sec)),
+            "-t", str(scene_duration),
             str(output_scene_path)
         ])
 

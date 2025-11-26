@@ -255,7 +255,8 @@ export async function confirmPlot(runId: string, editedPlot?: any): Promise<void
   }
 
   if (!response.ok) {
-    throw new Error(`Failed to confirm plot: ${response.statusText}`)
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(`Failed to confirm plot: ${errorData.detail || response.statusText}`)
   }
 }
 
