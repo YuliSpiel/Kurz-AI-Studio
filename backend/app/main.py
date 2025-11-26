@@ -1089,20 +1089,33 @@ async def get_assets(run_id: str):
                     plot_prompts[scene_id] = plot_scene["image_prompt"]
 
     # Build scenes array
+    # Track previous image URL to detect cached (reused) images
+    prev_image_url = None
     scenes = []
+
     for i, scene in enumerate(layout.get("scenes", [])):
         scene_id = scene.get("scene_id", f"scene_{i+1}")
         scene_number = i + 1
 
         # Get image URL
         image_url = None
+        image_path_raw = None
+        is_cached = False
+
         for img in scene.get("images", []):
             if img.get("image_url"):
-                # Convert file path to URL
-                image_path = img["image_url"]
-                if Path(image_path).exists():
-                    image_url = f"/outputs/{run_id}/{Path(image_path).name}"
+                image_path_raw = img["image_url"]
+                if Path(image_path_raw).exists():
+                    image_url = f"/outputs/{run_id}/{Path(image_path_raw).name}"
                 break
+
+        # Check if this is a cached image (same as previous scene)
+        if image_url and image_url == prev_image_url:
+            is_cached = True
+
+        # Update prev_image_url for next iteration
+        if image_url:
+            prev_image_url = image_url
 
         # Get image prompt from plot.json (original with {char_1} variables)
         # Fall back to layout.json if not found
@@ -1113,19 +1126,28 @@ async def get_assets(run_id: str):
                     image_prompt = img["image_prompt"]
                     break
 
-        # Get narration text
-        narration = None
+        # Get narration text (combine all texts for this scene)
+        narrations = []
         for text in scene.get("texts", []):
             if text.get("text"):
-                narration = text["text"]
-                break
+                narrations.append(text["text"])
+        narration = " / ".join(narrations) if narrations else None
+
+        # Get image history for this scene
+        history_images = []
+        history_dir = output_dir / "image_history" / scene_id
+        if history_dir.exists():
+            for hist_file in sorted(history_dir.glob("*.png"), reverse=True):
+                history_images.append(f"/outputs/{run_id}/image_history/{scene_id}/{hist_file.name}")
 
         scenes.append({
             "scene_id": scene_id,
             "scene_number": scene_number,
-            "image_url": image_url,
+            "image_url": None if is_cached else image_url,  # Don't show cached images
             "image_prompt": image_prompt,
-            "narration": narration
+            "narration": narration,
+            "is_cached": is_cached,  # Flag to indicate this scene uses cached image
+            "history": history_images  # List of previous images (newest first)
         })
 
     # Get BGM info
@@ -1271,6 +1293,56 @@ async def regenerate_scene_image(run_id: str, scene_id: str, request: Request):
     try:
         image_prompt = new_prompt or scene.get("images", [{}])[0].get("image_prompt", "")
         mode = layout.get("metadata", {}).get("mode", "general")
+        art_style = layout.get("metadata", {}).get("art_style", "")
+
+        # Load characters.json for variable substitution
+        characters_json_path = output_dir / "characters.json"
+        characters = []
+        if characters_json_path.exists():
+            with open(characters_json_path, "r") as f:
+                characters = orjson.loads(f.read())
+
+        # Substitute character variables {char_1}, {char_2}, etc.
+        for i, char in enumerate(characters, start=1):
+            char_name = char.get("name", f"Character {i}")
+            char_appearance = char.get("appearance", "")
+            char_gender = char.get("gender", "")
+
+            # Build character description
+            char_desc = char_name
+            if char_appearance:
+                char_desc = f"{char_name} ({char_appearance})"
+            elif char_gender:
+                char_desc = f"{char_name} ({char_gender})"
+
+            # Replace both formats: {char_1} and {{char_1}}
+            image_prompt = image_prompt.replace(f"{{{{char_{i}}}}}", char_desc)
+            image_prompt = image_prompt.replace(f"{{char_{i}}}", char_desc)
+
+        # Append art style if not already in prompt
+        if art_style and art_style.lower() not in image_prompt.lower():
+            image_prompt = f"{image_prompt}, {art_style} style"
+
+        logger.info(f"[{run_id}] Regenerating image with prompt: {image_prompt[:200]}...")
+
+        # Backup current image to history folder before regenerating
+        import shutil
+        from datetime import datetime
+        history_dir = output_dir / "image_history" / scene_id
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        current_image_url = None
+        for img in scene.get("images", []):
+            if img.get("image_url"):
+                current_image_path = Path(img["image_url"])
+                if current_image_path.exists():
+                    current_image_url = img["image_url"]
+                    # Backup with timestamp
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_name = f"{timestamp}_{current_image_path.name}"
+                    shutil.copy2(current_image_path, history_dir / backup_name)
+                    logger.info(f"[{run_id}] Backed up image to history: {backup_name}")
+                break
 
         # Use GeminiImageClient to generate new image
         client = GeminiImageClient(api_key=settings.GEMINI_API_KEY)
@@ -1298,9 +1370,16 @@ async def regenerate_scene_image(run_id: str, scene_id: str, request: Request):
 
         logger.info(f"[{run_id}] Regenerated image for {scene_id}")
 
+        # Get image history for this scene
+        history_images = []
+        if history_dir.exists():
+            for hist_file in sorted(history_dir.glob("*.png"), reverse=True):
+                history_images.append(f"/outputs/{run_id}/image_history/{scene_id}/{hist_file.name}")
+
         return {
             "status": "regenerated",
-            "image_url": f"/outputs/{run_id}/{Path(new_image_path).name}"
+            "image_url": f"/outputs/{run_id}/{Path(new_image_path).name}",
+            "history": history_images  # List of previous images (newest first)
         }
 
     except Exception as e:

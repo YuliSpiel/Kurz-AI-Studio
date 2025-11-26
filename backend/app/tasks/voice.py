@@ -181,11 +181,11 @@ def voice_task(self, run_id: str, json_path: str, spec: dict):
                     output_filename=str(audio_dir / f"{scene_id}_{line_id}.mp3")
                 )
 
-                # Measure audio duration
+                # Measure audio duration using mutagen (lightweight, no ffmpeg dependency)
                 try:
-                    from moviepy.editor import AudioFileClip
-                    with AudioFileClip(str(audio_path)) as audio_clip:
-                        audio_duration_ms = int(audio_clip.duration * 1000)
+                    from mutagen.mp3 import MP3
+                    audio_info = MP3(str(audio_path))
+                    audio_duration_ms = int(audio_info.info.length * 1000)
                     logger.info(f"[{run_id}] Audio duration: {audio_duration_ms}ms for {scene_id}/{line_id}")
                 except Exception as e:
                     logger.warning(f"[{run_id}] Failed to measure audio duration: {e}, using default")
@@ -365,12 +365,12 @@ def voice_task_pro(self, run_id: str, json_path: str, spec: dict):
                 output_filename=str(audio_dir / audio_filename)
             )
 
-            # Measure audio duration
+            # Measure audio duration using mutagen (lightweight, no ffmpeg dependency)
             audio_duration_ms = None
             try:
-                from moviepy.editor import AudioFileClip
-                with AudioFileClip(str(audio_path)) as audio_clip:
-                    audio_duration_ms = int(audio_clip.duration * 1000)
+                from mutagen.mp3 import MP3
+                audio_info = MP3(str(audio_path))
+                audio_duration_ms = int(audio_info.info.length * 1000)
                 logger.info(f"[{run_id}] Audio duration: {audio_duration_ms}ms for {scene_id}")
             except Exception as e:
                 logger.warning(f"[{run_id}] Failed to measure duration: {e}")

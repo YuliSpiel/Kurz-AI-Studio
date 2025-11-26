@@ -44,11 +44,21 @@ def composer_task(self, run_id: str, json_path: str, spec: dict):
             layout = json.load(f)
 
         # Get music provider (stub mode bypasses all providers)
+        # NOTE: Set USE_LOCAL_BGM=false in .env to enable API-based music generation
+        use_local_bgm = getattr(settings, 'USE_LOCAL_BGM', True)
+
         if stub_mode:
             # Use stub client in test mode
             from app.providers.music.stub_client import StubMusicClient
             client = StubMusicClient()
             logger.info(f"[{run_id}] Using Stub client (test mode)")
+        elif use_local_bgm:
+            # Use local BGM assets (default - no API calls)
+            from app.providers.music.local_bgm_client import LocalBGMClient
+            client = LocalBGMClient()
+            logger.info(f"[{run_id}] Using Local BGM client (selecting from assets)")
+        # === API-based music generation (disabled by default) ===
+        # To enable: set USE_LOCAL_BGM=false in .env
         elif settings.ELEVENLABS_API_KEY:
             # ElevenLabs Sound Effects로 BGM 생성 (저렴하고 TTS와 통합)
             from app.providers.music.elevenlabs_music_client import ElevenLabsMusicClient

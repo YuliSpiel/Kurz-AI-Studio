@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     TTS_PROVIDER: Literal["elevenlabs", "playht", "minimax"] = "minimax"
     MUSIC_PROVIDER: Literal["elevenlabs", "mubert", "udio", "suno"] = "elevenlabs"
 
+    # BGM source (True = use local assets, False = use API for music generation)
+    USE_LOCAL_BGM: bool = True
+
     # Model/Prompt settings
     ART_STYLE_LORA: str = "WatercolorDream_v2"
     BASE_CHAR_SEED: int = 1001

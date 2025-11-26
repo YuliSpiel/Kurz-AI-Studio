@@ -31,6 +31,8 @@ export default function AssetReviewModal({
   const [editingBgmPrompt, setEditingBgmPrompt] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [selectedScene, setSelectedScene] = useState<SceneAsset | null>(null)
+  // Image history navigation: -1 = current, 0 = most recent history, 1 = older, etc.
+  const [historyIndex, setHistoryIndex] = useState<number>(-1)
 
   useEffect(() => {
     if (isOpen && runId) {
@@ -45,8 +47,10 @@ export default function AssetReviewModal({
       const data = await getAssets(runId)
       setScenes(data.scenes)
       setBgm(data.bgm)
-      if (data.scenes.length > 0) {
-        setSelectedScene(data.scenes[0])
+      // Select first non-cached scene as initial selection
+      const firstUniqueScene = data.scenes.find(s => !s.is_cached)
+      if (firstUniqueScene) {
+        setSelectedScene(firstUniqueScene)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load assets')
@@ -59,16 +63,21 @@ export default function AssetReviewModal({
     setRegeneratingScenes(prev => new Set(prev).add(sceneId))
     try {
       const result = await regenerateSceneImage(runId, sceneId, newPrompt)
+      const newImageUrl = result.image_url + '?t=' + Date.now()
+      const newHistory = result.history || []
+
       setScenes(prev =>
         prev.map(s =>
           s.scene_id === sceneId
-            ? { ...s, image_url: result.image_url + '?t=' + Date.now() }
+            ? { ...s, image_url: newImageUrl, history: newHistory }
             : s
         )
       )
       if (selectedScene?.scene_id === sceneId) {
-        setSelectedScene(prev => prev ? { ...prev, image_url: result.image_url + '?t=' + Date.now() } : null)
+        setSelectedScene(prev => prev ? { ...prev, image_url: newImageUrl, history: newHistory } : null)
       }
+      // Reset to current image after regeneration
+      setHistoryIndex(-1)
       setEditingPrompt(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to regenerate image')
@@ -294,15 +303,15 @@ export default function AssetReviewModal({
                   <circle cx="8.5" cy="8.5" r="1.5"/>
                   <polyline points="21 15 16 10 5 21"/>
                 </svg>
-                씬 이미지 ({scenes.length}개)
+                씬 이미지 ({scenes.filter(s => !s.is_cached).length}개)
               </h3>
 
-              {/* Scene thumbnails */}
+              {/* Scene thumbnails - only show scenes with unique images */}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                {scenes.map(scene => (
+                {scenes.filter(s => !s.is_cached).map(scene => (
                   <div
                     key={scene.scene_id}
-                    onClick={() => setSelectedScene(scene)}
+                    onClick={() => { setSelectedScene(scene); setHistoryIndex(-1); }}
                     style={{
                       width: '60px',
                       height: '80px',
@@ -331,13 +340,88 @@ export default function AssetReviewModal({
               {selectedScene && (
                 <div style={{ padding: '16px', backgroundColor: '#F9FAFB', borderRadius: '12px' }}>
                   <div style={{ display: 'flex', gap: '16px' }}>
-                    <div style={{ width: '200px', flexShrink: 0 }}>
+                    <div style={{ width: '200px', flexShrink: 0, position: 'relative' }}>
                       {regeneratingScenes.has(selectedScene.scene_id) ? (
                         <div style={{ width: '200px', height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#E5E7EB', borderRadius: '8px' }}>
                           <div className="enhancement-step-spinner" style={{ width: '32px', height: '32px' }}></div>
                         </div>
                       ) : (
-                        <img src={selectedScene.image_url || ''} alt={`Scene ${selectedScene.scene_number}`} style={{ width: '200px', height: '280px', objectFit: 'cover', borderRadius: '8px' }} />
+                        <>
+                          <img
+                            src={historyIndex === -1
+                              ? (selectedScene.image_url || '')
+                              : (selectedScene.history?.[historyIndex] || '')}
+                            alt={`Scene ${selectedScene.scene_number}`}
+                            style={{ width: '200px', height: '280px', objectFit: 'cover', borderRadius: '8px' }}
+                          />
+                          {/* History navigation arrows */}
+                          {(selectedScene.history?.length || 0) > 0 && (
+                            <>
+                              {/* Left arrow - go to older image */}
+                              <button
+                                onClick={() => setHistoryIndex(prev => Math.min(prev + 1, (selectedScene.history?.length || 1) - 1))}
+                                disabled={historyIndex >= (selectedScene.history?.length || 1) - 1}
+                                style={{
+                                  position: 'absolute',
+                                  left: '4px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  width: '28px',
+                                  height: '28px',
+                                  borderRadius: '50%',
+                                  border: 'none',
+                                  background: historyIndex >= (selectedScene.history?.length || 1) - 1 ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.5)',
+                                  color: 'white',
+                                  cursor: historyIndex >= (selectedScene.history?.length || 1) - 1 ? 'not-allowed' : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '16px'
+                                }}
+                              >
+                                ◀
+                              </button>
+                              {/* Right arrow - go to newer image */}
+                              <button
+                                onClick={() => setHistoryIndex(prev => Math.max(prev - 1, -1))}
+                                disabled={historyIndex <= -1}
+                                style={{
+                                  position: 'absolute',
+                                  right: '4px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  width: '28px',
+                                  height: '28px',
+                                  borderRadius: '50%',
+                                  border: 'none',
+                                  background: historyIndex <= -1 ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.5)',
+                                  color: 'white',
+                                  cursor: historyIndex <= -1 ? 'not-allowed' : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '16px'
+                                }}
+                              >
+                                ▶
+                              </button>
+                              {/* History indicator */}
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '8px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                background: 'rgba(0,0,0,0.6)',
+                                color: 'white',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontSize: '11px'
+                              }}>
+                                {historyIndex === -1 ? '현재' : `이전 ${historyIndex + 1}/${selectedScene.history?.length}`}
+                              </div>
+                            </>
+                          )}
+                        </>
                       )}
                     </div>
                     <div style={{ flex: 1 }}>

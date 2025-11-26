@@ -455,6 +455,22 @@ def director_task_pro(self, asset_results: list, run_id: str, json_path: str):
 
         logger.info(f"[{run_id}] Plot loaded with {len(plot.get('scenes', []))} scenes")
 
+        # Load layout.json for title and layout_config
+        layout_json_path = Path(json_path).parent / "layout.json"
+        title_text = ""
+        layout_config = {}
+        if layout_json_path.exists():
+            try:
+                with open(layout_json_path, "r", encoding="utf-8") as f:
+                    layout = json.load(f)
+                title_text = layout.get("title", "")
+                layout_config = layout.get("metadata", {}).get("layout_config", {})
+                logger.info(f"[{run_id}] Layout config loaded: title='{title_text[:30]}...', config={layout_config}")
+            except Exception as e:
+                logger.warning(f"[{run_id}] Failed to load layout.json: {e}")
+        else:
+            logger.warning(f"[{run_id}] layout.json not found at {layout_json_path}")
+
         # Update plot with asset URLs from chord results (if any)
         if asset_results:
             for result in asset_results:
@@ -584,7 +600,9 @@ def director_task_pro(self, asset_results: list, run_id: str, json_path: str):
             run_id=run_id,
             scene_videos=scene_videos,
             bgm_url=plot.get("bgm_url"),
-            output_dir=output_dir
+            output_dir=output_dir,
+            title_text=title_text,
+            layout_config=layout_config
         )
 
         logger.info(f"[{run_id}] Final Pro mode video: {final_video_path}")
@@ -634,15 +652,22 @@ def _compose_pro_video(
     run_id: str,
     scene_videos: list,
     bgm_url: str | None,
-    output_dir: Path
+    output_dir: Path,
+    title_text: str = "",
+    layout_config: dict | None = None
 ) -> Path:
     """
-    Compose final Pro mode video from scene videos.
+    Compose final Pro mode video with General mode layout.
+
+    Layout structure (1080x1920):
+    - Title block: ~200px (top) - colored background + title text
+    - Subtitle area: ~640px (middle) - text on white background
+    - Video area: 1080x1080 (bottom) - 1:1 cropped video
 
     For each scene:
-    1. Load Kling-generated video (5 seconds)
-    2. If TTS > 5 seconds, add freeze frame extension
-    3. Overlay subtitle
+    1. Generate static frame with title + subtitle using PIL
+    2. Crop Kling video to 1:1 and overlay on frame
+    3. If TTS > 5s, extend with freeze frame
     4. Add TTS audio
 
     Then concatenate all scenes and add BGM.
@@ -651,82 +676,192 @@ def _compose_pro_video(
         run_id: Run identifier
         scene_videos: List of scene video info dicts
         bgm_url: Path to global BGM audio
-        output_dir: Output directory
+        output_dir: Output directory (MUST be absolute path)
+        title_text: Project title for title block
+        layout_config: Layout configuration (colors, fonts, etc.)
 
     Returns:
         Path to final video
     """
     import subprocess
+    import shutil
+    from PIL import Image, ImageDraw, ImageFont
     from app.config import settings
+    from app.utils.fonts import get_font_path
 
-    logger.info(f"[{run_id}] Composing Pro mode video with {len(scene_videos)} scenes")
+    logger.info(f"[{run_id}] === Pro Mode Video Composition Start (General Layout) ===")
+    logger.info(f"[{run_id}] Scenes: {len(scene_videos)}")
+    logger.info(f"[{run_id}] Title: {title_text[:50]}..." if title_text else f"[{run_id}] No title")
 
-    # Create temp directory for intermediate files
+    # CRITICAL: Ensure output_dir is absolute from the start
+    output_dir = Path(output_dir).resolve()
+    logger.info(f"[{run_id}] Output dir (absolute): {output_dir}")
+
+    # Create temp directories with absolute paths
     temp_dir = output_dir / "temp_pro"
+    frames_dir = temp_dir / "frames"
     temp_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"[{run_id}] Temp dir: {temp_dir}")
 
-    processed_videos = []
+    # Layout configuration
+    layout_config = layout_config or {}
+    FRAME_WIDTH = 1080
+    FRAME_HEIGHT = 1920
+    VIDEO_SIZE = 1080  # 1:1 square video area
+
+    # Title block settings
+    title_bg_color = _hex_to_rgb(layout_config.get("title_bg_color", "#323296"))
+    title_font_size = layout_config.get("title_font_size", 100)
+    subtitle_font_size = layout_config.get("subtitle_font_size", 80)
+
+    # Load fonts
+    title_font_id = layout_config.get("title_font", "AppleGothic")
+    subtitle_font_id = layout_config.get("subtitle_font", "AppleGothic")
+    title_font_path = get_font_path(title_font_id)
+    subtitle_font_path = get_font_path(subtitle_font_id)
+
+    try:
+        title_font = ImageFont.truetype(title_font_path, title_font_size)
+        subtitle_font = ImageFont.truetype(subtitle_font_path, subtitle_font_size)
+    except Exception as e:
+        logger.warning(f"[{run_id}] Font load error: {e}, using default")
+        title_font = ImageFont.load_default()
+        subtitle_font = ImageFont.load_default()
+
+    processed_videos: list[Path] = []
 
     for idx, scene_info in enumerate(scene_videos):
         scene_id = scene_info["scene_id"]
-        video_path = scene_info["video_path"]
+
+        # CRITICAL: Convert all input paths to absolute immediately
+        raw_video_path = scene_info["video_path"]
+        video_path = Path(raw_video_path).resolve()
+
+        if not video_path.exists():
+            logger.error(f"[{run_id}] Video not found: {video_path}")
+            raise FileNotFoundError(f"Scene video not found: {video_path}")
+
         tts_duration_ms = scene_info.get("tts_duration_ms") or 5000
-        audio_url = scene_info.get("audio_url")
+        raw_audio_url = scene_info.get("audio_url")
         subtitle_text = scene_info.get("text", "")
 
         tts_duration_sec = tts_duration_ms / 1000.0
-        video_duration_sec = settings.KLING_VIDEO_DURATION  # 5 seconds
+        video_duration_sec = float(settings.KLING_VIDEO_DURATION)  # 5 seconds
 
-        logger.info(f"[{run_id}] Processing {scene_id}: video={video_duration_sec}s, tts={tts_duration_sec}s")
+        logger.info(f"[{run_id}] [{idx+1}/{len(scene_videos)}] {scene_id}")
+        logger.info(f"[{run_id}]   Video: {video_path}")
+        logger.info(f"[{run_id}]   Duration: video={video_duration_sec}s, tts={tts_duration_sec}s")
+        logger.info(f"[{run_id}]   Subtitle: {subtitle_text[:30]}..." if subtitle_text else f"[{run_id}]   No subtitle")
 
+        # === Step 1: Create static frame with PIL (title + subtitle + white bg) ===
+        frame_path = frames_dir / f"{scene_id}_frame.png"
+        frame_img = Image.new('RGB', (FRAME_WIDTH, FRAME_HEIGHT), (255, 255, 255))
+        draw = ImageDraw.Draw(frame_img)
+
+        # Calculate title block height
+        title_block_height = 0
+        if title_text:
+            title_lines = _wrap_text(title_text, title_font, int(FRAME_WIDTH * 0.9))
+            line_height = int(title_font_size * 1.3)
+            padding = 40
+            title_block_height = len(title_lines) * line_height + padding * 2
+
+            # Draw title background
+            draw.rectangle([(0, 0), (FRAME_WIDTH, title_block_height)], fill=title_bg_color)
+
+            # Draw title text (centered)
+            current_y = padding
+            for line in title_lines:
+                bbox = title_font.getbbox(line)
+                text_width = bbox[2] - bbox[0]
+                x_centered = (FRAME_WIDTH - text_width) // 2
+                _draw_text_with_stroke(draw, line, (x_centered, current_y), title_font,
+                                       fill_color=(255, 255, 255), stroke_color=(0, 0, 0), stroke_width=3)
+                current_y += line_height
+
+        # Video area starts at bottom (1080px height)
+        video_area_top = FRAME_HEIGHT - VIDEO_SIZE  # 1920 - 1080 = 840
+
+        # Subtitle area: between title block and video area
+        subtitle_area_top = title_block_height
+        subtitle_area_height = video_area_top - title_block_height
+
+        # Draw subtitle (centered in subtitle area)
+        if subtitle_text:
+            subtitle_lines = _wrap_text(subtitle_text, subtitle_font, int(FRAME_WIDTH * 0.9))
+            line_height = int(subtitle_font_size * 1.3)
+            total_text_height = len(subtitle_lines) * line_height
+
+            # Center vertically in subtitle area
+            subtitle_y = subtitle_area_top + (subtitle_area_height - total_text_height) // 2
+
+            for line in subtitle_lines:
+                bbox = subtitle_font.getbbox(line)
+                text_width = bbox[2] - bbox[0]
+                x_centered = (FRAME_WIDTH - text_width) // 2
+                _draw_text_with_stroke(draw, line, (x_centered, subtitle_y), subtitle_font,
+                                       fill_color=(0, 0, 0), stroke_color=(255, 255, 255), stroke_width=2)
+                subtitle_y += line_height
+
+        # Save frame
+        frame_img.save(frame_path, "PNG")
+        logger.info(f"[{run_id}]   ✓ Frame created: {frame_path.name}")
+
+        # === Step 2: Process video with FFmpeg ===
         output_scene_path = temp_dir / f"{scene_id}_processed.mp4"
 
-        # Build FFmpeg filter complex
-        filter_parts = []
-        inputs = ["-i", video_path]
-        input_count = 1
-
-        # Add audio input if available
-        if audio_url and Path(audio_url).exists():
-            inputs.extend(["-i", audio_url])
-            audio_input_idx = input_count
-            input_count += 1
-        else:
-            audio_input_idx = None
-
-        # Check if we need freeze frame extension
-        if tts_duration_sec > video_duration_sec:
-            extra_duration = tts_duration_sec - video_duration_sec
-            logger.info(f"[{run_id}] {scene_id}: Adding {extra_duration}s freeze frame")
-
-            # Extract last frame, create freeze, concatenate
-            # Using tpad filter for freeze frame at the end
-            filter_parts.append(
-                f"[0:v]tpad=stop_mode=clone:stop_duration={extra_duration}[vout]"
-            )
-        else:
-            filter_parts.append("[0:v]copy[vout]")
-
-        # Add subtitle overlay
-        if subtitle_text:
-            # Escape special characters for FFmpeg drawtext
-            escaped_text = subtitle_text.replace("'", "\\'").replace(":", "\\:")
-
-            # Create subtitle filter with Korean font support
-            subtitle_filter = (
-                f"drawtext=text='{escaped_text}':"
-                f"fontfile=/System/Library/Fonts/AppleSDGothicNeo.ttc:"
-                f"fontsize=48:fontcolor=white:"
-                f"borderw=3:bordercolor=black:"
-                f"x=(w-text_w)/2:y=h-120"
-            )
-
-            # Chain subtitle filter
-            current_filter = filter_parts[-1]
-            filter_parts[-1] = current_filter.replace("[vout]", "[vtmp]")
-            filter_parts.append(f"[vtmp]{subtitle_filter}[vout]")
+        # Prepare audio input (absolute path)
+        audio_path: Path | None = None
+        if raw_audio_url:
+            audio_path = Path(raw_audio_url).resolve()
+            if not audio_path.exists():
+                logger.warning(f"[{run_id}]   Audio not found: {audio_path}")
+                audio_path = None
+            else:
+                logger.info(f"[{run_id}]   Audio: {audio_path}")
 
         # Build FFmpeg command
+        # Input 0: Kling video
+        # Input 1: Static frame (for overlay base)
+        # Input 2: Audio (optional)
+
+        inputs = [
+            "-i", str(video_path),
+            "-loop", "1", "-t", str(max(tts_duration_sec, video_duration_sec)), "-i", str(frame_path)
+        ]
+        input_count = 2
+
+        audio_input_idx: int | None = None
+        if audio_path:
+            inputs.extend(["-i", str(audio_path)])
+            audio_input_idx = input_count
+            input_count += 1
+
+        # Filter complex:
+        # 1. Crop video to 1:1 (center crop)
+        # 2. Scale to VIDEO_SIZE x VIDEO_SIZE
+        # 3. If TTS > 5s, extend video with freeze frame (tpad)
+        # 4. Overlay video on frame at bottom
+
+        filter_parts = []
+
+        # Crop and scale video to 1:1 (1080x1080)
+        # crop=min(iw,ih):min(iw,ih) crops to square from center
+        crop_scale = f"[0:v]crop=min(iw\\,ih):min(iw\\,ih),scale={VIDEO_SIZE}:{VIDEO_SIZE}"
+
+        # Add freeze frame extension if needed
+        if tts_duration_sec > video_duration_sec:
+            extra_duration = tts_duration_sec - video_duration_sec
+            logger.info(f"[{run_id}]   Freeze frame: +{extra_duration:.1f}s")
+            crop_scale += f",tpad=stop_mode=clone:stop_duration={extra_duration}"
+
+        crop_scale += "[vcropped]"
+        filter_parts.append(crop_scale)
+
+        # Overlay cropped video on frame at video_area_top position
+        filter_parts.append(f"[1:v][vcropped]overlay=0:{video_area_top}[vout]")
+
         filter_complex = ";".join(filter_parts)
 
         cmd = [
@@ -740,7 +875,7 @@ def _compose_pro_video(
         if audio_input_idx is not None:
             cmd.extend(["-map", f"{audio_input_idx}:a"])
         else:
-            cmd.extend(["-an"])  # No audio
+            cmd.extend(["-an"])
 
         cmd.extend([
             "-c:v", "libx264",
@@ -748,24 +883,27 @@ def _compose_pro_video(
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "128k",
+            "-t", str(max(tts_duration_sec, video_duration_sec)),
             str(output_scene_path)
         ])
 
         try:
-            logger.debug(f"[{run_id}] FFmpeg command: {' '.join(cmd)}")
-            subprocess.run(cmd, check=True, capture_output=True)
-            processed_videos.append(str(output_scene_path))
-            logger.info(f"[{run_id}] ✓ Processed {scene_id}")
+            logger.debug(f"[{run_id}] FFmpeg: {' '.join(cmd)}")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            processed_videos.append(output_scene_path)
+            logger.info(f"[{run_id}]   ✓ Processed -> {output_scene_path.name}")
         except subprocess.CalledProcessError as e:
-            logger.error(f"[{run_id}] FFmpeg error for {scene_id}: {e.stderr.decode()}")
-            # Use original video as fallback
-            processed_videos.append(video_path)
+            logger.error(f"[{run_id}]   ✗ FFmpeg error: {e.stderr}")
+            raise
 
-    # Concatenate all processed videos
+    # === Concatenate all processed videos ===
+    logger.info(f"[{run_id}] Concatenating {len(processed_videos)} videos...")
+
     concat_list_path = temp_dir / "concat_list.txt"
     with open(concat_list_path, "w") as f:
-        for video_path in processed_videos:
-            f.write(f"file '{video_path}'\n")
+        for vpath in processed_videos:
+            f.write(f"file '{vpath}'\n")
+            logger.debug(f"[{run_id}]   - {vpath}")
 
     concat_output = temp_dir / "concat_no_bgm.mp4"
 
@@ -779,19 +917,30 @@ def _compose_pro_video(
     ]
 
     try:
-        subprocess.run(concat_cmd, check=True, capture_output=True)
-        logger.info(f"[{run_id}] ✓ Concatenated all scenes")
+        logger.debug(f"[{run_id}] Concat cmd: {' '.join(concat_cmd)}")
+        subprocess.run(concat_cmd, check=True, capture_output=True, text=True)
+        logger.info(f"[{run_id}] ✓ Concatenation complete: {concat_output.name}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"[{run_id}] Concat error: {e.stderr.decode()}")
+        logger.error(f"[{run_id}] ✗ Concat error: {e.stderr}")
+        logger.error(f"[{run_id}] Concat list contents:")
+        with open(concat_list_path) as f:
+            logger.error(f.read())
         raise
 
-    # Add BGM if available
+    # === Add BGM if available ===
     final_output = output_dir / "final_video.mp4"
 
-    if bgm_url and Path(bgm_url).exists():
-        logger.info(f"[{run_id}] Adding BGM: {bgm_url}")
+    bgm_path: Path | None = None
+    if bgm_url:
+        bgm_path = Path(bgm_url).resolve()
+        if not bgm_path.exists():
+            logger.warning(f"[{run_id}] BGM not found: {bgm_path}")
+            bgm_path = None
 
-        # Get video duration for BGM looping
+    if bgm_path:
+        logger.info(f"[{run_id}] Adding BGM: {bgm_path}")
+
+        # Get video duration for BGM trimming
         probe_cmd = [
             "ffprobe", "-v", "error",
             "-show_entries", "format=duration",
@@ -800,13 +949,14 @@ def _compose_pro_video(
         ]
         result = subprocess.run(probe_cmd, capture_output=True, text=True)
         video_duration = float(result.stdout.strip())
+        logger.info(f"[{run_id}] Video duration: {video_duration:.1f}s")
 
         # Mix BGM with existing audio
         bgm_cmd = [
             "ffmpeg", "-y",
             "-i", str(concat_output),
             "-stream_loop", "-1",
-            "-i", bgm_url,
+            "-i", str(bgm_path),
             "-filter_complex",
             f"[1:a]volume=0.3,atrim=0:{video_duration}[bgm];"
             f"[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
@@ -820,22 +970,69 @@ def _compose_pro_video(
         ]
 
         try:
-            subprocess.run(bgm_cmd, check=True, capture_output=True)
-            logger.info(f"[{run_id}] ✓ BGM added")
+            subprocess.run(bgm_cmd, check=True, capture_output=True, text=True)
+            logger.info(f"[{run_id}] ✓ BGM mixed successfully")
         except subprocess.CalledProcessError as e:
-            logger.error(f"[{run_id}] BGM mix error: {e.stderr.decode()}")
-            # Fallback: use concat output without BGM
-            import shutil
+            logger.error(f"[{run_id}] ✗ BGM mix error: {e.stderr}")
             shutil.copy(concat_output, final_output)
+            logger.warning(f"[{run_id}] Using video without BGM as fallback")
     else:
-        # No BGM, just copy concat output
-        import shutil
         shutil.copy(concat_output, final_output)
         logger.info(f"[{run_id}] No BGM, using concatenated video as final")
 
-    # Cleanup temp files (optional, keep for debugging)
-    # import shutil
-    # shutil.rmtree(temp_dir)
-
-    logger.info(f"[{run_id}] ✓ Final Pro mode video: {final_output}")
+    logger.info(f"[{run_id}] === Pro Mode Video Composition Complete ===")
+    logger.info(f"[{run_id}] ✓ Final video: {final_output}")
     return final_output
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """Convert hex color to RGB tuple."""
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
+def _wrap_text(text: str, font, max_width: int) -> list[str]:
+    """Wrap text to fit within max_width."""
+    from PIL import ImageFont
+    lines = []
+    words = text.split()
+    current_line = []
+
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = font.getbbox(test_line)
+        text_width = bbox[2] - bbox[0]
+
+        if text_width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+
+    if current_line:
+        lines.append(' '.join(current_line))
+
+    return lines if lines else [text]
+
+
+def _draw_text_with_stroke(
+    draw,
+    text: str,
+    position: tuple[int, int],
+    font,
+    fill_color: tuple[int, int, int],
+    stroke_color: tuple[int, int, int],
+    stroke_width: int = 3
+):
+    """Draw text with stroke (outline)."""
+    x, y = position
+
+    # Draw stroke
+    for offset_x in range(-stroke_width, stroke_width + 1):
+        for offset_y in range(-stroke_width, stroke_width + 1):
+            if offset_x != 0 or offset_y != 0:
+                draw.text((x + offset_x, y + offset_y), text, font=font, fill=stroke_color)
+
+    # Draw main text
+    draw.text((x, y), text, font=font, fill=fill_color)

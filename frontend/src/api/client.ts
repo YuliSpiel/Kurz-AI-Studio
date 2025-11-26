@@ -448,6 +448,8 @@ export interface SceneAsset {
   image_url: string | null
   image_prompt: string | null
   narration: string | null
+  is_cached?: boolean  // True if this scene uses cached image from previous scene
+  history?: string[]  // List of previous image URLs (newest first)
 }
 
 export interface BgmAsset {
@@ -484,7 +486,7 @@ export async function regenerateSceneImage(
   runId: string,
   sceneId: string,
   newPrompt?: string
-): Promise<{ image_url: string }> {
+): Promise<{ image_url: string; history?: string[] }> {
   const body = newPrompt ? { image_prompt: newPrompt } : {}
 
   const response = await fetch(
