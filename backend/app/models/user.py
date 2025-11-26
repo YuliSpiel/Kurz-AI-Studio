@@ -26,6 +26,8 @@ class User(Base):
     hashed_password = Column(String, nullable=True)  # nullable for OAuth users
     google_id = Column(String, unique=True, index=True, nullable=True)  # Google OAuth ID
     profile_image = Column(String, nullable=True)  # Profile image URL from OAuth
+    youtube_refresh_token = Column(String, nullable=True)  # YouTube API refresh token
+    youtube_channel_name = Column(String, nullable=True)  # YouTube channel display name
     credits = Column(Integer, default=0, nullable=False)
     subscription_tier = Column(
         SQLEnum(SubscriptionTier),

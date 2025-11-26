@@ -528,3 +528,96 @@ export async function regenerateBgm(
 
   return response.json()
 }
+
+// ============ YouTube API Functions ============
+
+export interface YouTubeConnectionStatus {
+  connected: boolean
+  channel_name: string | null
+}
+
+export interface YouTubeUploadRequest {
+  run_id: string
+  title: string
+  description: string
+  scheduled_time?: string
+}
+
+export interface YouTubeUploadResponse {
+  success: boolean
+  message: string
+  video_id?: string
+  video_url?: string
+}
+
+export async function getYouTubeStatus(): Promise<YouTubeConnectionStatus> {
+  const token = localStorage.getItem('auth_token')
+
+  if (!token) {
+    return { connected: false, channel_name: null }
+  }
+
+  const response = await fetch(`${API_BASE}/youtube/status`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    return { connected: false, channel_name: null }
+  }
+
+  return response.json()
+}
+
+export function getYouTubeAuthUrl(): string {
+  const token = localStorage.getItem('auth_token')
+  return `${API_BASE}/youtube/auth?token=${token}`
+}
+
+export async function uploadToYouTube(request: YouTubeUploadRequest): Promise<YouTubeUploadResponse> {
+  const token = localStorage.getItem('auth_token')
+
+  if (!token) {
+    throw new AuthenticationError('로그인이 필요합니다')
+  }
+
+  const response = await fetch(`${API_BASE}/youtube/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(request),
+  })
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new AuthenticationError('로그인이 필요합니다')
+    }
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'YouTube 업로드에 실패했습니다')
+  }
+
+  return response.json()
+}
+
+export async function disconnectYouTube(): Promise<void> {
+  const token = localStorage.getItem('auth_token')
+
+  if (!token) {
+    throw new AuthenticationError('로그인이 필요합니다')
+  }
+
+  const response = await fetch(`${API_BASE}/youtube/disconnect`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'YouTube 연결 해제에 실패했습니다')
+  }
+}

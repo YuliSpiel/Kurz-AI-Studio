@@ -194,6 +194,29 @@ def qa_task(self, run_id: str, json_path: str, video_path: str):
                     }
                 )
                 logger.info(f"[{run_id}] Published END state with video_url: {video_url}")
+
+                # Update database with video_url and state
+                try:
+                    from app.database import get_sync_session_maker
+                    from app.models.run import Run as RunModel, RunState as DBRunState
+                    from sqlalchemy import select
+
+                    SessionLocal = get_sync_session_maker()
+                    with SessionLocal() as db:
+                        result = db.execute(
+                            select(RunModel).where(RunModel.run_id == run_id)
+                        )
+                        db_run = result.scalars().first()
+                        if db_run:
+                            db_run.video_url = video_url
+                            db_run.state = DBRunState.COMPLETED
+                            db_run.progress = 100
+                            db.commit()
+                            logger.info(f"[{run_id}] Database updated: video_url={video_url}, state=COMPLETED")
+                        else:
+                            logger.warning(f"[{run_id}] Run not found in database for update")
+                except Exception as db_error:
+                    logger.error(f"[{run_id}] Failed to update database: {db_error}")
         else:
             logger.warning(f"[{run_id}] QA: ❌ Checks FAILED - Issues: {qa_results['issues']}")
             publish_progress(
