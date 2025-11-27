@@ -1369,8 +1369,24 @@ async def regenerate_scene_image(run_id: str, scene_id: str, request: Request):
         )
 
         # Update layout.json with new image path
+        # Also update all other scenes that share the same image (is_cached scenes)
+        old_image_url = None
         for img in scene.get("images", []):
+            old_image_url = img.get("image_url")
             img["image_url"] = str(new_image_path)
+
+        # Find and update all scenes that reference the same old image URL
+        if old_image_url:
+            updated_scenes = [scene_id]
+            for other_scene in layout.get("scenes", []):
+                if other_scene.get("scene_id") == scene_id:
+                    continue  # Already updated
+                for img in other_scene.get("images", []):
+                    if img.get("image_url") == old_image_url:
+                        img["image_url"] = str(new_image_path)
+                        updated_scenes.append(other_scene.get("scene_id"))
+            if len(updated_scenes) > 1:
+                logger.info(f"[{run_id}] Updated image URL for scenes sharing same image: {updated_scenes}")
 
         with open(layout_json_path, "wb") as f:
             f.write(orjson.dumps(layout, option=orjson.OPT_INDENT_2))

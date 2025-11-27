@@ -99,6 +99,11 @@ body {
   color: #666;
 }
 
+.navbar-menu-item.active {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
 .header {
   text-align: center;
   color: #1c1c1c;

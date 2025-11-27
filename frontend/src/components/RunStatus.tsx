@@ -504,7 +504,10 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
 
                   {/* YouTube Upload Button */}
                   <button
-                    onClick={() => setShowShareModal(true)}
+                    onClick={() => {
+                      console.log('[RunStatus] YouTube button clicked, opening ShareModal')
+                      setShowShareModal(true)
+                    }}
                     style={{
                       padding: '12px 24px',
                       backgroundColor: '#FF0000',
@@ -554,6 +557,17 @@ export default function RunStatus({ runId, onCompleted, reviewMode, onMinimize, 
             </div>
           </div>
         </div>
+
+        {/* Share Modal (YouTube Upload) - inside END state return */}
+        {showShareModal && (
+          <ShareModal
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+            videoUrl={status.artifacts?.video_url || `/outputs/${runId}/final_video.mp4`}
+            runId={runId}
+            defaultTitle={videoTitle}
+          />
+        )}
       </div>
     )
   }

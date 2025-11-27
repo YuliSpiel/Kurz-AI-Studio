@@ -768,19 +768,20 @@ def _compose_pro_video(
         frame_img = Image.new('RGB', (FRAME_WIDTH, FRAME_HEIGHT), (255, 255, 255))
         draw = ImageDraw.Draw(frame_img)
 
-        # Calculate title block height
+        # Calculate title block height with notch safe area
         title_block_height = 0
+        notch_safe_area = 120  # Safe area for smartphone notch/dynamic island
         if title_text:
             title_lines = _wrap_text(title_text, title_font, int(FRAME_WIDTH * 0.9))
             line_height = int(title_font_size * 1.3)
             padding = 40
-            title_block_height = len(title_lines) * line_height + padding * 2
+            title_block_height = notch_safe_area + padding + len(title_lines) * line_height + padding
 
             # Draw title background
             draw.rectangle([(0, 0), (FRAME_WIDTH, title_block_height)], fill=title_bg_color)
 
-            # Draw title text (centered)
-            current_y = padding
+            # Draw title text (centered, below notch safe area)
+            current_y = notch_safe_area + padding
             for line in title_lines:
                 bbox = title_font.getbbox(line)
                 text_width = bbox[2] - bbox[0]

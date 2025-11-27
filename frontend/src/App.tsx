@@ -7,11 +7,12 @@ import AuthModal from './components/AuthModal'
 import Library from './components/Library'
 import UserMenu from './components/UserMenu'
 import VideoSettingsModal from './components/VideoSettingsModal'
+import UploadManager from './components/UploadManager'
 import { PromptEnhancementResult } from './api/client'
 import { useAuth } from './contexts/AuthContext'
 
 type AppMode = 'general' | 'pro'
-type ViewMode = 'home' | 'library'
+type ViewMode = 'home' | 'library' | 'upload-manager'
 
 function App() {
   const { user } = useAuth()
@@ -61,11 +62,11 @@ function App() {
     setViewMode('home')
   }
 
-  const handleEditorMode = () => {
-    setShowDetailedForm(true)
-    setAppMode('general')
-    setEnhancementData(null)
-    setViewMode('home')
+  const handleUploadManager = () => {
+    setViewMode('upload-manager')
+    setCurrentRunId(null)
+    setCompletedRun(null)
+    setShowDetailedForm(false)
   }
 
   const handleLibraryClick = () => {
@@ -136,8 +137,8 @@ function App() {
               <p style={{ textAlign: 'center', marginLeft: '5px' }}>가장 쉬운 숏폼 제작 플랫폼</p>
             </div>
             <div className="navbar-menu">
-              <a href="#" onClick={(e) => { e.preventDefault(); handleEditorMode(); }} className="navbar-menu-item">에디터 모드</a>
-              <a href="#" onClick={(e) => { e.preventDefault(); handleLibraryClick(); }} className="navbar-menu-item">라이브러리</a>
+              <a href="#" onClick={(e) => { e.preventDefault(); handleUploadManager(); }} className={`navbar-menu-item ${viewMode === 'upload-manager' ? 'active' : ''}`}>업로드 매니저</a>
+              <a href="#" onClick={(e) => { e.preventDefault(); handleLibraryClick(); }} className={`navbar-menu-item ${viewMode === 'library' ? 'active' : ''}`}>라이브러리</a>
               <a href="#" className="navbar-menu-item">캘린더</a>
               <a href="#" className="navbar-menu-item">커뮤니티</a>
             </div>
@@ -155,7 +156,9 @@ function App() {
       </nav>
 
       <div className="app">
-        {viewMode === 'library' ? (
+        {viewMode === 'upload-manager' ? (
+          <UploadManager />
+        ) : viewMode === 'library' ? (
           <Library onSelectVideo={(runId) => {
             setCurrentRunId(runId)
             setIsRunStatusMinimized(false) // Open the modal when selecting from library
