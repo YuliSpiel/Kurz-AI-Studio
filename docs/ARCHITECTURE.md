@@ -1,6 +1,6 @@
 # Kurz AI Studio - 시스템 아키텍처
 
-**최종 업데이트**: 2025-11-21
+**최종 업데이트**: 2025-11-27
 
 ## 전체 구조
 
@@ -12,7 +12,7 @@
        │ HTTP/WebSocket
        ↓
 ┌──────────────────────┐
-│   FastAPI Server     │ (Port 8000)
+│   FastAPI Server     │ (Port 8080)
 │   (app/main.py)      │
 └──────┬───────────────┘
        │
@@ -30,7 +30,7 @@
        ├── Gemini 2.5 Flash (LLM - 시나리오)
        ├── Gemini Flash 2.0 (이미지 생성)
        ├── ElevenLabs (TTS + BGM)
-       └── MoviePy + FFmpeg (영상 합성)
+       └── FFmpeg (영상 합성)
 ```
 
 ---
@@ -44,9 +44,11 @@
 **주요 컴포넌트**:
 - `App.tsx`: 메인 앱, 상태 관리
 - `HeroChat.tsx`: 히어로 섹션 채팅 UI (프롬프트 풍부화)
-- `RunForm.tsx`: 에디터 모드 입력 폼
+- `RunForm.tsx`: 상세 입력 폼
 - `RunStatus.tsx`: 실시간 진행도 표시 (모달)
 - `LayoutReviewModal.tsx`: 레이아웃 검수 모달
+- `Library.tsx`: 영상 라이브러리
+- `UploadManager.tsx`: 자동 업로드 스케줄 관리
 
 **통신**:
 - REST API: `/v1/runs` (POST), `/v1/runs/{run_id}` (GET)
@@ -62,7 +64,9 @@
 - `POST /v1/runs`: 새 Run 생성
 - `GET /v1/runs/{run_id}`: Run 상태 조회
 - `POST /v1/runs/{run_id}/layout-confirm`: 레이아웃 확정 (영상 렌더링 시작)
+- `POST /v1/runs/{run_id}/regenerate-asset`: 에셋 재생성
 - `POST /v1/enhance`: 프롬프트 풍부화 (Gemini Flash)
+- `POST /api/youtube/upload/{run_id}`: YouTube 업로드
 - `WS /ws/{run_id}`: 실시간 업데이트
 
 ---
@@ -77,7 +81,7 @@
 3. `composer_task` - 작곡가: ElevenLabs BGM 생성
 4. `voice_task` - 성우: ElevenLabs TTS 생성
 5. `director_task` - 감독: FFmpeg 영상 합성
-6. `qa_task` - QA: 품질 검수
+6. `qa_task` - QA: 품질 검수 + DB 업데이트
 
 **병렬 실행 (Chord 패턴)**:
 ```python
@@ -184,6 +188,8 @@ Kurz_Studio_AI/
 │   │   │   ├── RunForm.tsx
 │   │   │   ├── RunStatus.tsx
 │   │   │   ├── LayoutReviewModal.tsx
+│   │   │   ├── Library.tsx
+│   │   │   ├── UploadManager.tsx
 │   │   │   └── Player.tsx
 │   │   └── api/
 │   │       └── client.ts

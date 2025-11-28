@@ -1,6 +1,6 @@
 # Kurz AI Studio - 설치 및 실행 가이드
 
-**최종 업데이트**: 2025-11-21
+**최종 업데이트**: 2025-11-27
 
 ## 필수 요구사항
 
@@ -90,7 +90,7 @@ celery -A app.celery_app worker --loglevel=info --pool=gevent --concurrency=10
 ```bash
 cd backend
 source kvenv/bin/activate
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8080
 ```
 
 ---
@@ -108,8 +108,8 @@ npm run dev
 ## 7. 접속
 
 - **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Docs (Swagger)**: http://localhost:8000/docs
+- **Backend API**: http://localhost:8080
+- **API Docs (Swagger)**: http://localhost:8080/docs
 
 ---
 

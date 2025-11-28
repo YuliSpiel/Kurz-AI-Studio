@@ -1,11 +1,11 @@
 # Kurz AI Studio - API 명세
 
-**최종 업데이트**: 2025-11-21
+**최종 업데이트**: 2025-11-27
 
 ## Base URL
 
 ```
-http://localhost:8000
+http://localhost:8080
 ```
 
 ---
@@ -234,3 +234,47 @@ Run의 실시간 진행 상황을 수신합니다.
 | `404` | Run 없음 |
 | `422` | 입력 검증 실패 |
 | `500` | 서버 오류 |
+
+---
+
+### 6. Regenerate Asset (에셋 재생성)
+
+**POST** `/v1/runs/{run_id}/regenerate-asset`
+
+특정 에셋(이미지/TTS)을 재생성합니다.
+
+#### Request Body
+
+```json
+{
+  "asset_type": "image",
+  "scene_id": "scene_1"
+}
+```
+
+---
+
+### 7. YouTube Upload
+
+**POST** `/api/youtube/upload/{run_id}`
+
+완성된 영상을 YouTube에 업로드합니다.
+
+#### Request Body
+
+```json
+{
+  "title": "영상 제목",
+  "description": "영상 설명",
+  "scheduled_time": "2025-11-28T18:00:00Z"
+}
+```
+
+#### Response
+
+```json
+{
+  "video_id": "youtube_video_id",
+  "video_url": "https://youtube.com/shorts/..."
+}
+```
